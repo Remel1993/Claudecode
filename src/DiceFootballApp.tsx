@@ -700,7 +700,9 @@ const drawKnockoutGroups = (pool, isWC, randomize) => {
   if (randomize) pots = pots.map(pot => [...pot].sort(() => Math.random() - 0.5));
 
   if (isWC) {
+     let steps = 0;
      const solve = (potIdx, groupIdx) => {
+        if (++steps > 2500) return false;
         if (potIdx === 4) return true;
         if (groupIdx === 8) return solve(potIdx + 1, 0);
 
@@ -726,9 +728,11 @@ const drawKnockoutGroups = (pool, isWC, randomize) => {
      let workingPots = pots.map(pot => pot.map(t => ({...t, used: false})));
      pots = workingPots;
      let success = solve(0, 0);
-     if (!success) groups = Array.from({length: 8}, (_, i) => [pots[0][i], pots[1][i], pots[2][i], pots[3][i]]);
+     if (!success) groups = Array.from({length: 8}, (_, i) => [pots[0][i], pots[1][i], pots[2][i], pots[3][i]].filter(Boolean));
   } else {
+     let steps = 0;
      const solve = (potIdx, groupIdx) => {
+        if (++steps > 2500) return false;
         if (potIdx === 4) return true;
         if (groupIdx === 8) return solve(potIdx + 1, 0);
 
@@ -750,7 +754,7 @@ const drawKnockoutGroups = (pool, isWC, randomize) => {
      let workingPots = pots.map(pot => pot.map(t => ({...t, used: false})));
      pots = workingPots;
      let success = solve(0, 0);
-     if (!success) groups = Array.from({length: 8}, (_, i) => [pots[0][i], pots[1][i], pots[2][i], pots[3][i]]);
+     if (!success) groups = Array.from({length: 8}, (_, i) => [pots[0][i], pots[1][i], pots[2][i], pots[3][i]].filter(Boolean));
   }
 
   const formattedGroups = groups.map((g, i) => ({ name: 'Grupo ' + String.fromCharCode(65 + i), teamIds: g.map(t => t.id) }));
@@ -2568,6 +2572,15 @@ function DiceFootballApp() {
       return next;
     });
     setSeasonState(s => ({ season: (s.season || 1) + 1, globalMatchday: 1, phase: 'leagues' }));
+    setCareer(c => (c.active ? {
+      ...c,
+      completedOfficeWeeks: [],
+      trainedMatchday: -1,
+      medicalImmunityWeeks: 0,
+      activeInjury: null,
+      lastSimulationFeedback: null,
+      seasonLog: []
+    } : c));
     setActiveCompId(null);
     setCompView('main');
     setView('hub');
@@ -3330,7 +3343,6 @@ function DiceFootballApp() {
               reason: 'Candidatura formal aceptada por la junta directiva tras 2 semanas de evaluación.',
               fromApplication: true
             };
-            newOffers = [newOffer, ...newOffers.filter(o => o.id !== newOffer.id)];
             updatedAppHistory = [
               {
                 id: `app-res-${Date.now()}`,
@@ -3391,6 +3403,14 @@ function DiceFootballApp() {
         }
       }
 
+      // Caducidad de ofertas en el buzón: las que se enviaron por "Decidir más tarde" solo están disponibles 2 semanas
+      const prunedOffers = (newOffers || []).map(o => {
+        if (o.weeksRemaining !== undefined && o.weeksRemaining !== null) {
+          return { ...o, weeksRemaining: o.weeksRemaining - 1 };
+        }
+        return o;
+      }).filter(o => o.weeksRemaining === undefined || o.weeksRemaining === null || o.weeksRemaining > 0);
+
       // Si en esta misma jornada se produjo lesión, se activan 3 semanas de inmunidad para las siguientes jornadas.
       // Si ya venía de antes, se consume 1 semana de protección.
       const injuryHappened = injuryOccurredThisMatchday || (c.activeInjury && c.activeInjury.matchday === careerMd);
@@ -3414,7 +3434,7 @@ function DiceFootballApp() {
         lastSimulationFeedback: simFeedback,
         stats: newStats,
         activeApplication: updatedActiveApp,
-        offers: newOffers,
+        offers: prunedOffers,
         applicationHistory: updatedAppHistory,
         pendingAppResolutionModal: appResolutionModal || c.pendingAppResolutionModal,
         seasonLog: [
@@ -3664,12 +3684,103 @@ function DiceFootballApp() {
     };
   }, [clComp, careerClTeam, careerClAlive, careerClWinnerId, seasonState.phase, seasonState.season]);
 
-  // Manda al técnico a la Champions global: mismo cuadro, mismos rivales, mismo motor
-  const openCareerChampions = () => {
-    if (!clComp?.teams?.length) return;
+  // Simula hasta el final (100% de jornadas) todas las ligas europeas pendientes,
+  // registra sus campeones, inicializa la Champions League con los clasificados reales
+  // y abre la Champions League inmediatamente sin bloqueos.
+  const finishAllLeaguesAndOpenChampions = () => {
+    const seasonNow = seasonState.season || 1;
+    setComps(prev => {
+      const next = { ...prev };
+      LEAGUE_IDS.forEach(compId => {
+        const comp = prev[compId];
+        if (!comp || comp.type !== 'league') return;
+        let upd = { ...comp };
+        const runDivToFinish = (teamsKey: string, mdKey: string, histKey: string, winKey: string) => {
+          let guard = 0;
+          const total = divTotalRounds(upd[teamsKey]);
+          while ((upd[mdKey] || 0) < total && guard++ < 80) {
+            const res = simulateDivisionMatchday(upd[teamsKey], upd[mdKey] || 0, upd[histKey] || []);
+            if (!res) break;
+            upd = {
+              ...upd,
+              [teamsKey]: res.updatedTeams,
+              [mdKey]: res.nextMatchday,
+              [histKey]: res.newHistory,
+              [winKey]: res.isFinished ? true : upd[winKey]
+            };
+          }
+        };
+        runDivToFinish('teams', 'matchday', 'history', 'showWinner');
+        runDivToFinish('teams2', 'matchday2', 'history2', 'showWinner2');
+
+        if (leagueSeasonOver(upd)) {
+          upd.previousStandings = buildStandingsSnapshot(upd.teams) || upd.previousStandings || null;
+          upd.previousStandings2 = buildStandingsSnapshot(upd.teams2) || upd.previousStandings2 || null;
+        }
+        next[compId] = upd;
+      });
+
+      const seasonTitles = [];
+      LEAGUE_IDS.forEach(id => {
+        const c = next[id];
+        if (!c) return;
+        const r1 = buildSeasonRecord(c.teams, seasonNow);
+        const r2 = buildSeasonRecord(c.teams2, seasonNow);
+        if (r1) seasonTitles.push({ compId: id, compName: c.name, type: 'league', div: 1, winner: r1.champion, season: seasonNow });
+        if (r2) seasonTitles.push({ compId: id, compName: c.name, type: 'league', div: 2, winner: r2.champion, season: seasonNow });
+      });
+      registerTitles(seasonTitles);
+
+      LEAGUE_IDS.forEach(id => {
+        const c = next[id];
+        if (!c) return;
+        const withHistory = registerSeasonSummary(c, seasonNow);
+        next[id] = {
+          ...withHistory,
+          previousStandings: buildStandingsSnapshot(c.teams) || c.previousStandings || null,
+          previousStandings2: buildStandingsSnapshot(c.teams2) || c.previousStandings2 || null
+        };
+      });
+
+      // ¿El club del modo carrera se clasificó? (1ª División, top CL_SPOTS)
+      const careerQualifiedName = (() => {
+        if (!career.active || !career.teamId || career.div !== 1) return null;
+        const comp = next[career.compId];
+        const table = [...(comp?.teams || [])].sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf);
+        const pos = table.findIndex(t => t.id === career.teamId) + 1;
+        return pos > 0 && pos <= CL_SPOTS ? table[pos - 1].name : null;
+      })();
+
+      const cl = getAutoFillData('C1', next, careerQualifiedName ? [careerQualifiedName] : []);
+      if (cl) {
+        const mine = careerQualifiedName ? (cl.teams || []).find(t => t.name === careerQualifiedName) : null;
+        next['C1'] = {
+          ...next['C1'], ...cl,
+          name: next['C1']?.name || 'Champions League',
+          careerTeamName: careerQualifiedName || null,
+          careerTeamId: mine?.id || null,
+          userTeamId: mine?.id || cl.userTeamId
+        };
+      }
+      return next;
+    });
+
+    setCareer(c => (c.active ? { ...c, clSeason: seasonNow } : c));
+    setSeasonState(s => ({ ...s, phase: 'champions', globalMatchday: 38 }));
     setActiveCompId('C1');
     setCompView('main');
     setView('competition');
+  };
+
+  // Manda al técnico a la Champions global: mismo cuadro, mismos rivales, mismo motor
+  const openCareerChampions = () => {
+    if (comps['C1']?.teams?.length > 0 && seasonState.phase === 'champions') {
+      setActiveCompId('C1');
+      setCompView('main');
+      setView('competition');
+      return;
+    }
+    finishAllLeaguesAndOpenChampions();
   };
 
 
@@ -3840,6 +3951,8 @@ function DiceFootballApp() {
       active: true,
       compId: offer.compId, div: offer.div, teamId: offer.teamId,
       tier: offer.tier, pe: 0, fired: false, offers: [], seasonLog: [],
+      activeApplication: null,
+      transferredInSeason: season,
       reputation: clampRep(c.reputation + bonus),
       signingBonus: bonus,
       clQualifiedFor: null, badStreak: 0,
@@ -3849,6 +3962,9 @@ function DiceFootballApp() {
       lastProcessedSeason: c.lastProcessedSeason,
       medicalImmunityWeeks: 0,
       trainedMatchday: -1,
+      completedOfficeWeeks: [],
+      activeInjury: null,
+      lastSimulationFeedback: null,
       originalTeamStats: team ? {
         teamId: team.id,
         compId: offer.compId,
@@ -3873,7 +3989,14 @@ function DiceFootballApp() {
       contractSeasons: CONTRACT_SEASONS,
       fired: false,
       offers: [],
-      signedForSeason: season
+      signedForSeason: season,
+      activeApplication: null,
+      completedOfficeWeeks: [],
+      trainedMatchday: -1,
+      medicalImmunityWeeks: 0,
+      activeInjury: null,
+      lastSimulationFeedback: null,
+      seasonLog: []
     }));
     setCareerReview(null);
     setView('career');
@@ -4013,8 +4136,10 @@ function DiceFootballApp() {
   // Postulación activa a un club vacante (máximo 1 activa, evaluación a ciegas de 2 semanas)
   const submitCareerApplication = (vacancy) => {
     if (!vacancy) return;
+    const season = seasonState.season || 1;
     setCareer(c => {
       if (c.activeApplication) return c; // Límite: máximo 1 postulación activa a la vez
+      if (c.transferredInSeason === season || c.signedForSeason === season) return c; // Ya firmó en esta temporada
       return {
         ...c,
         activeApplication: {
