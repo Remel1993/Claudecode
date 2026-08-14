@@ -1,0 +1,819 @@
+import React, { useState, useMemo } from 'react';
+import { Trophy, Dices, Zap, Shield as ShieldIcon, ChevronRight, Calendar, Award, CheckCircle2, XCircle, Clock, Sparkles, Layers, ArrowLeft, RotateCcw } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { clPhaseLabel, getChampionsObjectiveTarget, CL_PHASE_ORDER } from '../lib/career';
+
+interface CareerChampionsHubProps {
+  career: any;
+  team: any;
+  clComp: any;
+  clInfo: any;
+  onPlayChampionsMatch: () => void;
+  onSimulateChampionsMatch: () => void;
+  onSimulateAllChampions?: () => void;
+  onOpenNewSeason?: () => void;
+  onBackToCareer?: () => void;
+  ui: any;
+}
+
+export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
+  career,
+  team,
+  clComp,
+  clInfo,
+  onPlayChampionsMatch,
+  onSimulateChampionsMatch,
+  onSimulateAllChampions,
+  onOpenNewSeason,
+  onBackToCareer,
+  ui
+}) => {
+  const { Shield } = ui;
+  const [subTab, setSubTab] = useState<'match' | 'groups' | 'bracket' | 'schedule' | 'objective'>('match');
+  const [selectedGroupIdx, setSelectedGroupIdx] = useState<number | null>(null);
+
+  // Identificar el equipo del modo carrera dentro de la Champions (C1)
+  const careerClTeam = useMemo(() => {
+    if (!clComp?.teams?.length || !team) return null;
+    return clComp.teams.find((t: any) => t.id === clComp.careerTeamId) ||
+      clComp.teams.find((t: any) => t.name === (clComp.careerTeamName || team.name)) || null;
+  }, [clComp, team]);
+
+  const phase = clComp?.phase || 'groups';
+  const matchday = clComp?.matchday || 0;
+  const isFinished = clComp?.showWinner || phase === 'Terminado';
+
+  // Buscar el grupo del usuario
+  const userGroup = useMemo(() => {
+    if (!clComp?.groups || !careerClTeam) return null;
+    return clComp.groups.find((g: any) => g.teamIds?.includes(careerClTeam.id)) || clComp.groups[0] || null;
+  }, [clComp, careerClTeam]);
+
+  // Si no se ha seleccionado grupo manualmente, mostrar por defecto el grupo del usuario
+  const activeGroupIdx = useMemo(() => {
+    if (selectedGroupIdx !== null) return selectedGroupIdx;
+    if (!userGroup || !clComp?.groups) return 0;
+    const idx = clComp.groups.findIndex((g: any) => g.name === userGroup.name);
+    return idx >= 0 ? idx : 0;
+  }, [selectedGroupIdx, userGroup, clComp]);
+
+  // Calcular el partido actual del usuario en Champions
+  const currentMatchData = useMemo(() => {
+    if (!clComp || !careerClTeam) return null;
+
+    if (phase === 'groups') {
+      if (!userGroup) return null;
+      const groupTeams = (clComp.teams || []).filter((t: any) => userGroup.teamIds?.includes(t.id));
+      const roundIdx = matchday % 6;
+      // Generar calendario de grupo de 4 equipos
+      const n = groupTeams.length;
+      if (n === 4) {
+        const teamIds = groupTeams.map((t: any) => t.id);
+        const rounds: any[] = [];
+        for (let j = 0; j < 6; j++) {
+          const round: any[] = [];
+          const isReturn = j >= 3;
+          const r = isReturn ? j - 3 : j;
+          for (let i = 0; i < 2; i++) {
+            const home = i === 0 ? teamIds[3] : teamIds[(r + i) % 3];
+            const away = teamIds[(3 - 1 - i + r) % 3];
+            round.push(isReturn ? { homeId: away, awayId: home } : { homeId: home, awayId: away });
+          }
+          rounds.push(round);
+        }
+        const currentRound = rounds[roundIdx] || [];
+        const match = currentRound.find((m: any) => m.homeId === careerClTeam.id || m.awayId === careerClTeam.id);
+        if (match) {
+          const home = clComp.teams.find((t: any) => t.id === match.homeId);
+          const away = clComp.teams.find((t: any) => t.id === match.awayId);
+          const isHome = match.homeId === careerClTeam.id;
+          const rival = isHome ? away : home;
+          return {
+            match,
+            home,
+            away,
+            isHome,
+            rival,
+            phaseLabel: `Fase de Grupos · Jornada ${roundIdx + 1} de 6`,
+            groupName: userGroup.name,
+            isVuelta: false,
+            aggregate: null
+          };
+        }
+      }
+    } else if (['Octavos', 'Cuartos', 'Semis', 'Final'].includes(phase)) {
+      const bracketMatches = Array.isArray(clComp.bracket?.[phase])
+        ? clComp.bracket[phase]
+        : [clComp.bracket?.[phase]].filter(Boolean);
+
+      const match = bracketMatches.find((m: any) => m && (m.hId === careerClTeam.id || m.aId === careerClTeam.id));
+      if (match) {
+        const isVuelta = matchday % 2 !== 0 && phase !== 'Final';
+        const homeId = isVuelta ? match.aId : match.hId;
+        const awayId = isVuelta ? match.hId : match.aId;
+        const home = clComp.teams.find((t: any) => t.id === homeId);
+        const away = clComp.teams.find((t: any) => t.id === awayId);
+        const isHome = homeId === careerClTeam.id;
+        const rival = isHome ? away : home;
+
+        let aggregate = null;
+        if (isVuelta && match.sh !== null && match.sa !== null) {
+          // Ida: sh (hId), sa (aId)
+          // En la vuelta, el equipo hId juega de visitante
+          aggregate = {
+            homeLeg1: match.sa, // goles que metió el que ahora es local en la ida
+            awayLeg1: match.sh  // goles que metió el que ahora es visitante en la ida
+          };
+        }
+
+        const legText = phase === 'Final' ? 'Gran Final (Partido Único)' : isVuelta ? 'Vuelta' : 'Ida';
+        return {
+          match,
+          home,
+          away,
+          isHome,
+          rival,
+          phaseLabel: `${clPhaseLabel(phase)} · ${legText}`,
+          isVuelta,
+          aggregate,
+          leg1Score: match.sh !== null && match.sa !== null ? `${match.sh} - ${match.sa}` : null
+        };
+      }
+    }
+    return null;
+  }, [clComp, careerClTeam, phase, matchday, userGroup]);
+
+  // Determinar si el club fue campeón de Champions
+  const isChampion = useMemo(() => {
+    if (!isFinished || !clComp.bracket?.Final?.[0] || !careerClTeam) return false;
+    const finalMatch = clComp.bracket.Final[0];
+    const { hId, aId, sh, sa, penH, penA } = finalMatch;
+    if (sh === null || sa === null) return false;
+    let winnerId = null;
+    if (sh > sa) winnerId = hId;
+    else if (sa > sh) winnerId = aId;
+    else if (penH !== null && penA !== null) winnerId = penH > penA ? hId : aId;
+    return winnerId === careerClTeam.id;
+  }, [isFinished, clComp, careerClTeam]);
+
+  // Determinar si sigue vivo en Champions
+  const isAlive = useMemo(() => {
+    if (isFinished) return false;
+    if (!careerClTeam) return false;
+    if (phase === 'groups') return true;
+    return !!currentMatchData?.match;
+  }, [isFinished, careerClTeam, phase, currentMatchData]);
+
+  // Objetivo continental
+  const clObjective = useMemo(() => {
+    const target = getChampionsObjectiveTarget(career.tier || 1);
+    const targetRank = CL_PHASE_ORDER.indexOf(target.targetPhase);
+    const currentRank = CL_PHASE_ORDER.indexOf(phase);
+    let done = false;
+    let progress = 20;
+    let status: 'completed' | 'on_track' | 'at_risk' | 'failed' = 'on_track';
+    let statusLabel = 'En Carrera';
+
+    if (isChampion) {
+      done = true;
+      progress = 100;
+      status = 'completed';
+      statusLabel = '¡Campeón de Europa!';
+    } else if (!isAlive && !isFinished) {
+      if (currentRank >= targetRank) {
+        done = true;
+        progress = 100;
+        status = 'completed';
+        statusLabel = 'Objetivo Cumplido';
+      } else {
+        done = false;
+        progress = Math.max(10, Math.round((currentRank / (targetRank || 1)) * 80));
+        status = 'failed';
+        statusLabel = 'Eliminado';
+      }
+    } else if (isFinished && !isChampion) {
+      if (currentRank >= targetRank) {
+        done = true;
+        progress = 100;
+        status = 'completed';
+        statusLabel = 'Objetivo Cumplido';
+      } else {
+        done = false;
+        status = 'failed';
+        statusLabel = 'No Alcanzado';
+      }
+    } else {
+      if (currentRank >= targetRank) {
+        done = true;
+        progress = 100;
+        status = 'completed';
+        statusLabel = 'Objetivo Alcanzado';
+      } else {
+        done = false;
+        progress = Math.max(20, Math.min(90, Math.round(((currentRank + 1) / (targetRank + 1)) * 90)));
+        status = 'on_track';
+        statusLabel = `En ${clPhaseLabel(phase)}`;
+      }
+    }
+
+    return { target, done, progress, status, statusLabel };
+  }, [career.tier, phase, isChampion, isAlive, isFinished]);
+
+  return (
+    <div className='space-y-4 text-white'>
+      {/* HEADER DE CHAMPIONS LEAGUE */}
+      <div className='relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-950 via-slate-950 to-indigo-950 border border-blue-500/30 p-5 shadow-2xl'>
+        {/* Estrellas decorativas de fondo */}
+        <div className='absolute -right-10 -top-10 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl pointer-events-none' />
+        <div className='absolute left-1/3 -bottom-10 w-40 h-40 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none' />
+
+        <div className='relative z-10 flex flex-col gap-4'>
+          <div className='flex items-center justify-between'>
+            <div className='flex items-center gap-3'>
+              <div className='w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-blue-800 flex items-center justify-center shadow-lg border border-blue-400/40'>
+                <Trophy size={24} className='text-yellow-300 animate-pulse' />
+              </div>
+              <div>
+                <div className='flex items-center gap-2'>
+                  <span className='text-[9px] font-black uppercase tracking-widest text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20'>
+                    UEFA Champions League
+                  </span>
+                  <span className='text-[9px] font-bold text-slate-400'>
+                    Temporada {career.season || 1}
+                  </span>
+                </div>
+                <h2 className='text-lg font-black uppercase italic tracking-tight text-white mt-0.5 flex items-center gap-2'>
+                  {team?.name || 'Tu Club'}
+                  {careerClTeam && (
+                    <span className='text-xs font-bold text-slate-300 not-italic'>
+                      ({careerClTeam.att}/{careerClTeam.opp}/{careerClTeam.def})
+                    </span>
+                  )}
+                </h2>
+              </div>
+            </div>
+
+            {/* Badge de estado en Europa */}
+            <div>
+              {isChampion ? (
+                <div className='bg-gradient-to-r from-yellow-500 to-amber-500 text-slate-950 font-black text-[9px] uppercase px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 animate-bounce'>
+                  <Trophy size={12} /> Campeón 🏆
+                </div>
+              ) : isAlive ? (
+                <div className='bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-black text-[9px] uppercase px-3 py-1.5 rounded-full flex items-center gap-1.5'>
+                  <Sparkles size={11} className='animate-spin' /> {clPhaseLabel(phase)}
+                </div>
+              ) : (
+                <div className='bg-red-500/20 text-red-300 border border-red-500/30 font-black text-[9px] uppercase px-3 py-1.5 rounded-full flex items-center gap-1.5'>
+                  <XCircle size={11} /> Eliminado
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Estadísticas de Champions del Club */}
+          {careerClTeam && (
+            <div className='grid grid-cols-5 gap-2 bg-black/40 rounded-2xl p-2.5 border border-white/5'>
+              <div className='text-center'>
+                <p className='text-[8px] font-black uppercase text-slate-400'>PJ</p>
+                <p className='text-xs font-black text-white tabular-nums'>{careerClTeam.p || 0}</p>
+              </div>
+              <div className='text-center'>
+                <p className='text-[8px] font-black uppercase text-slate-400'>V - E - D</p>
+                <p className='text-xs font-black text-white tabular-nums'>
+                  {careerClTeam.w || 0}-{careerClTeam.d || 0}-{careerClTeam.l || 0}
+                </p>
+              </div>
+              <div className='text-center'>
+                <p className='text-[8px] font-black uppercase text-slate-400'>GF / GC</p>
+                <p className='text-xs font-black text-white tabular-nums'>
+                  {careerClTeam.gf || 0}/{careerClTeam.ga || 0}
+                </p>
+              </div>
+              <div className='text-center'>
+                <p className='text-[8px] font-black uppercase text-slate-400'>DG</p>
+                <p className='text-xs font-black text-emerald-400 tabular-nums'>
+                  {((careerClTeam.gf || 0) - (careerClTeam.ga || 0)) > 0 ? `+${(careerClTeam.gf || 0) - (careerClTeam.ga || 0)}` : ((careerClTeam.gf || 0) - (careerClTeam.ga || 0))}
+                </p>
+              </div>
+              <div className='text-center'>
+                <p className='text-[8px] font-black uppercase text-blue-400'>PTS</p>
+                <p className='text-xs font-black text-blue-300 tabular-nums'>{careerClTeam.pts || 0}</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* NAVEGACIÓN DE SUB-PESTAÑAS */}
+      <div className='grid grid-cols-5 gap-1 bg-slate-900/60 p-1 rounded-2xl border border-white/5 text-[9px] font-black uppercase tracking-wider'>
+        <button
+          onClick={() => setSubTab('match')}
+          className={`py-2 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1 ${
+            subTab === 'match'
+              ? 'bg-blue-600 text-white shadow-md'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Dices size={12} />
+          <span>Partido</span>
+        </button>
+        <button
+          onClick={() => setSubTab('groups')}
+          className={`py-2 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1 ${
+            subTab === 'groups'
+              ? 'bg-blue-600 text-white shadow-md'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Layers size={12} />
+          <span>Grupos</span>
+        </button>
+        <button
+          onClick={() => setSubTab('bracket')}
+          className={`py-2 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1 ${
+            subTab === 'bracket'
+              ? 'bg-blue-600 text-white shadow-md'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Trophy size={12} />
+          <span>Cuadro</span>
+        </button>
+        <button
+          onClick={() => setSubTab('schedule')}
+          className={`py-2 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1 ${
+            subTab === 'schedule'
+              ? 'bg-blue-600 text-white shadow-md'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Calendar size={12} />
+          <span>Fechas</span>
+        </button>
+        <button
+          onClick={() => setSubTab('objective')}
+          className={`py-2 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1 ${
+            subTab === 'objective'
+              ? 'bg-blue-600 text-white shadow-md'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Award size={12} />
+          <span>Objetivo</span>
+        </button>
+      </div>
+
+      {/* CONTENIDO DE SUB-PESTAÑAS */}
+      <AnimatePresence mode='wait'>
+        {/* SUB-PESTAÑA 1: PARTIDO ACTIVO / PRÓXIMO CRUCE */}
+        {subTab === 'match' && (
+          <motion.div
+            key='match'
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className='space-y-4'
+          >
+            {isChampion ? (
+              <div className='bg-gradient-to-br from-amber-500/20 via-yellow-500/10 to-slate-900 border border-yellow-500/40 rounded-3xl p-6 text-center space-y-4 shadow-xl'>
+                <Trophy size={48} className='text-yellow-400 mx-auto animate-bounce drop-shadow-[0_0_20px_rgba(250,204,21,0.5)]' />
+                <h3 className='text-xl font-black uppercase italic text-white'>¡CAMPEÓN DE LA UEFA CHAMPIONS LEAGUE!</h3>
+                <p className='text-xs font-bold text-yellow-200/90 max-w-md mx-auto'>
+                  Has alcanzado la gloria máxima del fútbol continental. Tu nombre y tu club quedan grabados para siempre en la historia de Europa.
+                </p>
+                <div className='flex justify-center gap-3 pt-2'>
+                  <div className='bg-black/40 px-4 py-2 rounded-2xl border border-yellow-500/30 text-center'>
+                    <p className='text-[8px] font-black uppercase text-yellow-400'>Recompensa Mánager</p>
+                    <p className='text-sm font-black text-white'>+10 PE · +8.0 Rep</p>
+                  </div>
+                </div>
+                {onOpenNewSeason && (
+                  <button
+                    onClick={onOpenNewSeason}
+                    className='w-full bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2'
+                  >
+                    <RotateCcw size={15} /> Iniciar Nueva Temporada Global
+                  </button>
+                )}
+              </div>
+            ) : currentMatchData ? (
+              <div className='bg-slate-900/80 rounded-3xl p-5 border border-blue-500/30 space-y-4 shadow-xl'>
+                <div className='flex items-center justify-between'>
+                  <div className='flex items-center gap-2'>
+                    <span className='w-2 h-2 rounded-full bg-blue-400 animate-ping' />
+                    <span className='text-[10px] font-black uppercase tracking-wider text-blue-300'>
+                      {currentMatchData.phaseLabel}
+                    </span>
+                  </div>
+                  {currentMatchData.aggregate && (
+                    <span className='text-[9px] font-black bg-blue-500/20 text-blue-200 px-2.5 py-1 rounded-full border border-blue-500/30'>
+                      Global Ida: {currentMatchData.leg1Score}
+                    </span>
+                  )}
+                </div>
+
+                {/* Matchup Card */}
+                <div className='bg-black/40 rounded-2xl p-4 border border-white/5 flex items-center justify-between'>
+                  {/* Local */}
+                  <div className='flex-1 flex flex-col items-center text-center'>
+                    <Shield
+                      color1={currentMatchData.home?.color1}
+                      color2={currentMatchData.home?.color2}
+                      initial={currentMatchData.home?.name}
+                      size='md'
+                      isFlag={currentMatchData.home?.isFlag}
+                    />
+                    <h4 className={`text-xs font-black uppercase italic mt-2 truncate w-full ${currentMatchData.home?.id === careerClTeam?.id ? 'text-blue-400' : 'text-white'}`}>
+                      {currentMatchData.home?.name}
+                    </h4>
+                    <span className='text-[8px] font-bold text-slate-400 bg-white/5 px-2 py-0.5 rounded-full mt-1'>
+                      {currentMatchData.home?.att}/{currentMatchData.home?.opp}/{currentMatchData.home?.def}
+                    </span>
+                  </div>
+
+                  {/* VS */}
+                  <div className='px-4 flex flex-col items-center shrink-0'>
+                    <span className='text-xs font-black italic text-slate-500'>VS</span>
+                    <span className='text-[8px] font-bold text-slate-400 uppercase mt-1'>
+                      {currentMatchData.isHome ? 'En Casa' : 'De Visita'}
+                    </span>
+                  </div>
+
+                  {/* Visitante */}
+                  <div className='flex-1 flex flex-col items-center text-center'>
+                    <Shield
+                      color1={currentMatchData.away?.color1}
+                      color2={currentMatchData.away?.color2}
+                      initial={currentMatchData.away?.name}
+                      size='md'
+                      isFlag={currentMatchData.away?.isFlag}
+                    />
+                    <h4 className={`text-xs font-black uppercase italic mt-2 truncate w-full ${currentMatchData.away?.id === careerClTeam?.id ? 'text-blue-400' : 'text-white'}`}>
+                      {currentMatchData.away?.name}
+                    </h4>
+                    <span className='text-[8px] font-bold text-slate-400 bg-white/5 px-2 py-0.5 rounded-full mt-1'>
+                      {currentMatchData.away?.att}/{currentMatchData.away?.opp}/{currentMatchData.away?.def}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Acciones de Partido */}
+                <div className='grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1'>
+                  <button
+                    onClick={onPlayChampionsMatch}
+                    className='w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:to-indigo-500 text-white py-4 rounded-2xl text-[10px] font-black uppercase italic tracking-widest active:scale-95 transition-all shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 border border-blue-400/40'
+                  >
+                    <Dices size={16} className='text-yellow-300 animate-pulse' />
+                    Jugar Partido con Dados
+                  </button>
+
+                  <button
+                    onClick={onSimulateChampionsMatch}
+                    className='w-full bg-slate-800 hover:bg-slate-700 text-slate-200 py-4 rounded-2xl text-[10px] font-black uppercase italic tracking-widest active:scale-95 transition-all border border-white/10 flex items-center justify-center gap-2'
+                  >
+                    <Zap size={16} className='text-amber-400' />
+                    Simular Partido Rápido
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className='bg-slate-900/80 rounded-3xl p-6 text-center space-y-3 border border-red-500/20'>
+                <XCircle size={36} className='text-red-400 mx-auto' />
+                <h3 className='text-sm font-black uppercase italic text-white'>Eliminado de la Competición</h3>
+                <p className='text-xs font-bold text-slate-300 max-w-sm mx-auto'>
+                  Tu equipo ha quedado fuera de la Champions League esta temporada. Sigue compitiendo en tu Liga Nacional para clasificar de nuevo el próximo año.
+                </p>
+                {onSimulateAllChampions && !isFinished && (
+                  <button
+                    onClick={onSimulateAllChampions}
+                    className='mt-2 bg-slate-800 hover:bg-slate-700 text-white px-5 py-3 rounded-2xl text-[10px] font-black uppercase italic tracking-widest border border-white/10 transition-all active:scale-95'
+                  >
+                    Simular Resto de la Champions League
+                  </button>
+                )}
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* SUB-PESTAÑA 2: FASE DE GRUPOS */}
+        {subTab === 'groups' && (
+          <motion.div
+            key='groups'
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className='space-y-4'
+          >
+            {/* Selector de Grupo */}
+            <div className='flex gap-1.5 overflow-x-auto pb-1 custom-scrollbar'>
+              {(clComp.groups || []).map((g: any, i: number) => {
+                const isMyGroup = g.teamIds?.includes(careerClTeam?.id);
+                return (
+                  <button
+                    key={g.name}
+                    onClick={() => setSelectedGroupIdx(i)}
+                    className={`px-3.5 py-2 rounded-xl text-[9px] font-black uppercase whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                      activeGroupIdx === i
+                        ? 'bg-blue-600 text-white shadow-md'
+                        : isMyGroup
+                          ? 'bg-blue-950/60 text-blue-300 border border-blue-500/40'
+                          : 'bg-slate-900/60 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <span>{g.name}</span>
+                    {isMyGroup && <span className='w-1.5 h-1.5 rounded-full bg-yellow-400' />}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Tabla del Grupo Activo */}
+            {clComp.groups?.[activeGroupIdx] && (
+              <div className='bg-slate-900/80 rounded-3xl p-4 border border-blue-500/20 space-y-2'>
+                <div className='flex items-center justify-between px-2 pb-1'>
+                  <h3 className='text-xs font-black uppercase italic text-blue-300'>
+                    {clComp.groups[activeGroupIdx].name}
+                  </h3>
+                  <span className='text-[8px] font-bold text-slate-400 uppercase'>
+                    Top 2 clasifican a Octavos
+                  </span>
+                </div>
+
+                <div className='space-y-1.5'>
+                  {(() => {
+                    const g = clComp.groups[activeGroupIdx];
+                    const gTeams = (clComp.teams || [])
+                      .filter((t: any) => g.teamIds?.includes(t.id))
+                      .sort((a: any, b: any) => (b.pts || 0) - (a.pts || 0) || ((b.gf || 0) - (b.ga || 0)) - ((a.gf || 0) - (a.ga || 0)) || (b.gf || 0) - (a.gf || 0));
+
+                    return gTeams.map((t: any, idx: number) => {
+                      const isMe = t.id === careerClTeam?.id;
+                      const isQualifying = idx < 2;
+
+                      return (
+                        <div
+                          key={t.id}
+                          className={`flex items-center gap-2 px-3 py-2.5 rounded-2xl transition-all ${
+                            isMe
+                              ? 'bg-blue-600/25 border border-blue-400/50 shadow-md'
+                              : idx % 2 === 0
+                                ? 'bg-black/30'
+                                : 'bg-black/15'
+                          } ${isQualifying ? 'border-l-4 border-l-emerald-500' : 'border-l-4 border-l-transparent'}`}
+                        >
+                          <span className={`w-4 text-[9px] font-black tabular-nums ${isQualifying ? 'text-emerald-400' : 'text-slate-500'}`}>
+                            {idx + 1}
+                          </span>
+                          <Shield color1={t.color1} color2={t.color2} initial={t.name} size='sm' isFlag={t.isFlag} />
+                          <div className='flex-grow min-w-0'>
+                            <p className={`text-[10px] font-black uppercase italic truncate ${isMe ? 'text-blue-300' : 'text-white'}`}>
+                              {t.name} {isMe && '★'}
+                            </p>
+                          </div>
+                          <span className='text-[9px] font-bold text-slate-400 tabular-nums w-5 text-center'>{t.p || 0}</span>
+                          <span className='text-[9px] font-bold text-slate-400 tabular-nums w-5 text-center'>{t.w || 0}</span>
+                          <span className='text-[9px] font-bold text-slate-400 tabular-nums w-5 text-center'>{t.d || 0}</span>
+                          <span className='text-[9px] font-bold text-slate-400 tabular-nums w-5 text-center'>{t.l || 0}</span>
+                          <span className='text-[9px] font-bold text-slate-400 tabular-nums w-7 text-center'>
+                            {(t.gf || 0) - (t.ga || 0) > 0 ? `+${(t.gf || 0) - (t.ga || 0)}` : (t.gf || 0) - (t.ga || 0)}
+                          </span>
+                          <span className='text-[10px] font-black text-white tabular-nums w-6 text-right'>{t.pts || 0}</span>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* SUB-PESTAÑA 3: CUADRO ELIMINATORIO / BRACKET */}
+        {subTab === 'bracket' && (
+          <motion.div
+            key='bracket'
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className='space-y-4'
+          >
+            {clComp.bracket ? (
+              <div className='flex gap-4 overflow-x-auto pb-4 custom-scrollbar'>
+                {['Octavos', 'Cuartos', 'Semis', 'Final'].filter(p => clComp.bracket[p]).map(p => (
+                  <div key={p} className='min-w-[260px] flex-shrink-0 space-y-2.5'>
+                    <div className='flex items-center justify-between bg-blue-950/40 px-3 py-1.5 rounded-xl border border-blue-500/20'>
+                      <h4 className='text-[10px] font-black uppercase italic text-blue-300'>{clPhaseLabel(p)}</h4>
+                      <span className='text-[8px] font-bold text-slate-400'>{p === 'Final' ? '1 Partido' : 'Ida y Vuelta'}</span>
+                    </div>
+
+                    <div className='space-y-2'>
+                      {(Array.isArray(clComp.bracket[p]) ? clComp.bracket[p] : [clComp.bracket[p]]).filter(Boolean).map((m: any, mi: number) => {
+                        const h = clComp.teams.find((t: any) => t.id === m.hId);
+                        const a = clComp.teams.find((t: any) => t.id === m.aId);
+                        const isMyMatch = m.hId === careerClTeam?.id || m.aId === careerClTeam?.id;
+
+                        let winner = null;
+                        if (p !== 'Final' ? m.sh2 !== null && m.sh2 !== undefined : m.sh !== null) {
+                          if (p !== 'Final') {
+                            const totH = (m.sh || 0) + (m.sh2 || 0);
+                            const totA = (m.sa || 0) + (m.sa2 || 0);
+                            if (totH > totA) winner = h;
+                            else if (totA > totH) winner = a;
+                            else if (m.penH !== null && m.penH !== undefined) winner = m.penH > m.penA ? h : a;
+                          } else {
+                            if (m.sh > m.sa) winner = h;
+                            else if (m.sa > m.sh) winner = a;
+                            else if (m.penH !== null && m.penH !== undefined) winner = m.penH > m.penA ? h : a;
+                          }
+                        }
+
+                        return (
+                          <div
+                            key={mi}
+                            className={`rounded-2xl p-3 border transition-all ${
+                              isMyMatch
+                                ? 'bg-blue-950/60 border-blue-400/60 shadow-lg'
+                                : 'bg-slate-900/60 border-white/5'
+                            }`}
+                          >
+                            {/* Equipo Local */}
+                            <div className='flex justify-between items-center py-1'>
+                              <div className='flex items-center gap-2 flex-1 truncate'>
+                                <Shield color1={h?.color1} color2={h?.color2} initial={h?.name} size='xs' isFlag={h?.isFlag} />
+                                <span className={`text-[9px] font-bold uppercase italic truncate ${h?.id === careerClTeam?.id ? 'text-blue-300 font-black' : h ? 'text-white' : 'text-slate-500'}`}>
+                                  {h?.name || 'Por Definir'}
+                                </span>
+                              </div>
+                              <div className='flex items-center gap-1 tabular-nums font-black text-[10px] bg-black/40 px-2 py-0.5 rounded-lg'>
+                                {m.sh !== null && <span>{m.sh}</span>}
+                                {p !== 'Final' && m.sh2 !== null && <span className='text-slate-400 text-[8px]'>({m.sh2})</span>}
+                                {m.penH !== null && m.penH !== undefined && <span className='text-red-400 text-[8px] font-black'>[{m.penH}]</span>}
+                              </div>
+                            </div>
+
+                            {/* Equipo Visitante */}
+                            <div className='flex justify-between items-center py-1 border-t border-white/5'>
+                              <div className='flex items-center gap-2 flex-1 truncate'>
+                                <Shield color1={a?.color1} color2={a?.color2} initial={a?.name} size='xs' isFlag={a?.isFlag} />
+                                <span className={`text-[9px] font-bold uppercase italic truncate ${a?.id === careerClTeam?.id ? 'text-blue-300 font-black' : a ? 'text-white' : 'text-slate-500'}`}>
+                                  {a?.name || 'Por Definir'}
+                                </span>
+                              </div>
+                              <div className='flex items-center gap-1 tabular-nums font-black text-[10px] bg-black/40 px-2 py-0.5 rounded-lg'>
+                                {m.sa !== null && <span>{m.sa}</span>}
+                                {p !== 'Final' && m.sa2 !== null && <span className='text-slate-400 text-[8px]'>({m.sa2})</span>}
+                                {m.penA !== null && m.penA !== undefined && <span className='text-red-400 text-[8px] font-black'>[{m.penA}]</span>}
+                              </div>
+                            </div>
+
+                            {/* Ganador */}
+                            {winner && (
+                              <div className='mt-1.5 pt-1.5 border-t border-white/5 flex items-center justify-between text-[8px] font-black uppercase text-emerald-400'>
+                                <span>{p === 'Final' ? '🏆 Campeón:' : 'Pasa a siguiente ronda:'}</span>
+                                <span className='truncate font-black text-white max-w-[120px]'>{winner.name}</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className='bg-slate-900/60 rounded-3xl p-8 text-center space-y-2 border border-white/5'>
+                <Trophy size={32} className='text-slate-500 mx-auto' />
+                <h4 className='text-xs font-black uppercase italic text-slate-300'>Cuadro de Eliminatorias no sorteado</h4>
+                <p className='text-[10px] font-bold text-slate-400'>
+                  Las eliminatorias (Octavos, Cuartos, Semifinales y Final) se sortearán automáticamente al concluir las 6 jornadas de la Fase de Grupos.
+                </p>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* SUB-PESTAÑA 4: CALENDARIO & HISTORIAL DE FECHAS */}
+        {subTab === 'schedule' && (
+          <motion.div
+            key='schedule'
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className='space-y-3'
+          >
+            {clComp.history?.length > 0 ? (
+              clComp.history.map((h: any, i: number) => (
+                <div key={i} className='bg-slate-900/80 rounded-2xl p-3 border border-white/5 space-y-2'>
+                  <div className='flex items-center justify-between'>
+                    <span className='text-[10px] font-black uppercase text-blue-300 italic'>{h.day}</span>
+                    <span className='text-[8px] font-bold text-slate-400'>{h.results?.length || 0} partidos</span>
+                  </div>
+                  <div className='grid grid-cols-1 sm:grid-cols-2 gap-1.5'>
+                    {h.results?.map((r: any, ri: number) => {
+                      const ht = clComp.teams.find((t: any) => t.id === r.hId);
+                      const at = clComp.teams.find((t: any) => t.id === r.aId);
+                      const isMe = r.hId === careerClTeam?.id || r.aId === careerClTeam?.id;
+
+                      return (
+                        <div
+                          key={ri}
+                          className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl text-[9px] ${
+                            isMe ? 'bg-blue-600/20 border border-blue-500/40 text-blue-200' : 'bg-black/30 text-slate-300'
+                          }`}
+                        >
+                          <span className='truncate font-bold max-w-[90px]'>{ht?.name || 'Local'}</span>
+                          <span className='font-black tabular-nums bg-black/40 px-2 py-0.5 rounded'>
+                            {r.sh} - {r.sa} {r.penH !== null && r.penH !== undefined && `(${r.penH}-${r.penA} pen)`}
+                          </span>
+                          <span className='truncate font-bold max-w-[90px] text-right'>{at?.name || 'Visitante'}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className='bg-slate-900/60 rounded-3xl p-6 text-center text-slate-400 text-xs font-bold'>
+                Aún no hay jornadas disputadas en esta edición de la Champions League.
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* SUB-PESTAÑA 5: OBJETIVO DE CHAMPIONS LEAGUE */}
+        {subTab === 'objective' && (
+          <motion.div
+            key='objective'
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className='space-y-4'
+          >
+            <div className='bg-slate-900/80 rounded-3xl p-5 border border-blue-500/30 space-y-4 shadow-xl'>
+              <div className='flex items-center justify-between'>
+                <div className='flex items-center gap-2'>
+                  <Trophy size={18} className='text-yellow-400' />
+                  <h3 className='text-sm font-black uppercase italic text-white'>
+                    Exigencia Continental de la Junta Directiva
+                  </h3>
+                </div>
+                <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
+                  clObjective.status === 'completed'
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : clObjective.status === 'failed'
+                      ? 'bg-red-500/20 text-red-300 border-red-500/30'
+                      : 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                }`}>
+                  {clObjective.statusLabel}
+                </span>
+              </div>
+
+              <div className='bg-black/40 rounded-2xl p-4 border border-white/5 space-y-2'>
+                <p className='text-xs font-black text-white'>{clObjective.target.label}</p>
+                <p className='text-[10px] font-bold text-slate-300'>{clObjective.target.detail}</p>
+                <div className='flex items-center justify-between pt-2 border-t border-white/5 text-[9px]'>
+                  <span className='text-slate-400 font-bold'>Meta Mínima:</span>
+                  <span className='text-white font-black'>{clObjective.target.targetValue}</span>
+                </div>
+              </div>
+
+              {/* Barra de Progreso */}
+              <div className='space-y-1.5'>
+                <div className='flex justify-between text-[9px] font-black uppercase'>
+                  <span className='text-slate-400'>Progreso Europeo</span>
+                  <span className='text-blue-300 tabular-nums'>{clObjective.progress}%</span>
+                </div>
+                <div className='w-full h-2.5 bg-black/50 rounded-full overflow-hidden p-0.5 border border-white/10'>
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${
+                      clObjective.status === 'completed'
+                        ? 'bg-emerald-500'
+                        : clObjective.status === 'failed'
+                          ? 'bg-red-500'
+                          : 'bg-blue-500'
+                    }`}
+                    style={{ width: `${clObjective.progress}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Recompensas */}
+              <div className='grid grid-cols-2 gap-2 pt-1'>
+                <div className='bg-black/30 rounded-xl p-2.5 text-center border border-white/5'>
+                  <p className='text-[8px] font-black uppercase text-amber-400'>Puntos de Entrenamiento</p>
+                  <p className='text-xs font-black text-white'>+{clObjective.target.pe} PE</p>
+                </div>
+                <div className='bg-black/30 rounded-xl p-2.5 text-center border border-white/5'>
+                  <p className='text-[8px] font-black uppercase text-sky-400'>Reputación Continental</p>
+                  <p className='text-xs font-black text-white'>+{clObjective.target.rep} pts</p>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};

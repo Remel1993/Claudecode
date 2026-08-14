@@ -23,6 +23,7 @@ import { SimulationFeedbackBanner } from './SimulationFeedbackBanner';
 import { CareerLegendProfile } from './CareerLegendProfile';
 import { EndSeasonModal } from './EndSeasonModal';
 import { ApplicationResolutionModal } from './ApplicationResolutionModal';
+import { CareerChampionsHub } from './CareerChampionsHub';
 
 const Panel = ({ children, className = '' }) => (
   <div className={`bg-slate-900/40 backdrop-blur-md rounded-[2rem] border border-white/10 shadow-lg ${className}`}>
@@ -336,7 +337,8 @@ export const CareerView = ({
   onRenameManager, reviewDone, contractSigned, allLeaguesFinished, championsFinished, onNewSeason,
   onApplyTrainingStats, onApplyDrillResult, onAcceptOffer, onRejectOffer, onSubmitApplication,
   onAdvanceOfficeWeek, onDecideLaterAppOffer, onRejectAppResolution, onDismissAppResolutionModal,
-  onDismissSimulationFeedback, allComps, schedule, ui
+  onDismissSimulationFeedback, allComps, schedule, clComp, onPlayChampionsMatch,
+  onSimulateChampionsMatch, onSimulateAllChampions, ui
 }) => {
   const { Shield, FormBadges, DieIcon } = ui;
   const [tab, setTab] = useState('main');
@@ -355,11 +357,24 @@ export const CareerView = ({
   const caps = tierCaps(tier);
   const cls = classOf(career.compId);
   const band = repBand(career.reputation);
-  const base = career.baseDist || { att: team?.att, opp: team?.opp, def: team?.def };
+  const base = useMemo(() => ({
+    att: Math.max(career.baseDist?.att || 1, team?.att || 1),
+    opp: Math.max(career.baseDist?.opp || 1, team?.opp || 1),
+    def: Math.max(career.baseDist?.def || 1, team?.def || 1)
+  }), [career.baseDist, team?.att, team?.opp, team?.def]);
   const currentMatchday = career.div === 2 ? (comp?.matchday2 || 0) : (comp?.matchday || 0);
   const activeInjury = career.activeInjury && career.activeInjury.matchday === currentMatchday ? career.activeInjury : null;
   const effectiveBase = activeInjury ? { ...base, [activeInjury.attr]: Math.max(1, (base[activeInjury.attr] || 1) - 1) } : base;
-  const totalTeamStrength = (effectiveBase?.att || 0) + (effectiveBase?.opp || 0) + (effectiveBase?.def || 0);
+  const totalTeamStrength = (base?.att || 0) + (base?.opp || 0) + (base?.def || 0);
+
+  const effectiveTactic = useMemo(() => {
+    const t = career.tactic || base;
+    if (!activeInjury) return t;
+    return {
+      ...t,
+      [activeInjury.attr]: Math.max(1, (t[activeInjury.attr] || base[activeInjury.attr] || 1) - 1)
+    };
+  }, [career.tactic, base, activeInjury]);
 
   const maxLeagueStrength = useMemo(() => {
     const allSquads = standings?.length ? standings : (comp?.teams || []);
@@ -367,15 +382,24 @@ export const CareerView = ({
     return Math.max(...allSquads.map(t => (t.att || 0) + (t.opp || 0) + (t.def || 0)), 14);
   }, [standings, comp]);
 
-  const options = useMemo(() => tacticalOptions(effectiveBase, tier), [effectiveBase, tier]);
+  const options = useMemo(() => tacticalOptions(base, tier), [base, tier]);
   const expected = useMemo(() => expectedPosition(standings, career.teamId), [standings, career.teamId]);
   const objective = objectiveFor(tier, position || expected);
   const perf = readPerformance(position || expected, expected);
   const log = career.seasonLog || [];
   const wins = log.filter(l => l.result === 'W').length;
   const maxed = isSquadMaxed(team, tier);
-  // La Champions del modo carrera ES la Champions global ('C1'): sólo se lee
+  // La Champions del modo carrera ES la Champions global ('C1') sincronizada
   const cl = clInfo;
+  const isClQualified = useMemo(() => {
+    if (clInfo || career.clQualified) return true;
+    if (clComp?.teams?.length > 0) {
+      return clComp.teams.some((t: any) => t.id === clComp.careerTeamId || t.name === (clComp.careerTeamName || team?.name));
+    }
+    return false;
+  }, [clInfo, career.clQualified, clComp, team]);
+
+  const clPhaseText = clComp?.phase ? (clComp.phase === 'Final' ? 'FINAL' : clComp.phase !== 'Terminado' ? 'EN VIVO' : null) : null;
   const season = seasonState?.season || 1;
   const seasonsLeft = Math.max(0, (career.contractStart || season) + (career.contractSeasons || CONTRACT_SEASONS) - season);
   const hasTrainedThisMatchday = career.trainedMatchday === currentMatchday;
@@ -792,11 +816,19 @@ export const CareerView = ({
         <TabButton active={tab === 'objectives'} onClick={() => setTab('objectives')} icon={<Target size={15} />} label='Objetivos' badge={`${coreMet}/${coreObjectives.length}`} />
         <TabButton active={tab === 'tactic'} onClick={() => setTab('tactic')} icon={<ShieldCheck size={15} />} label='Táctica' />
         <TabButton active={tab === 'squad'} onClick={() => setTab('squad')} icon={<Dumbbell size={15} />} label='Entreno' />
-        {cl && <TabButton active={tab === 'cl'} onClick={() => setTab('cl')} icon={<Trophy size={15} />} label='Champions' />}
+        {isClQualified && (
+          <TabButton
+            active={tab === 'cl'}
+            onClick={() => setTab('cl')}
+            icon={<Trophy size={15} className='text-yellow-400' />}
+            label='Champions'
+            badge={clPhaseText}
+          />
+        )}
         <TabButton active={tab === 'table'} onClick={() => setTab('table')} icon={<BarChart3 size={15} />} label='Tabla' />
         <TabButton active={tab === 'calendar'} onClick={() => setTab('calendar')} icon={<Calendar size={15} />} label='Calendario' />
         <TabButton active={tab === 'jobs'} onClick={() => setTab('jobs')} icon={<Briefcase size={15} />} label='Empleo' badge={marketVacancies?.length} />
-        <TabButton active={tab === 'market'} onClick={() => setTab('market')} icon={<Sparkles size={15} />} label='Buzón' badge={career.offers?.length} />
+        <TabButton active={tab === 'market'} onClick={() => setTab('market')} icon={<Sparkles size={15} />} label='Buzón' badge={(career.offers || []).filter(o => o.weeksRemaining === undefined || o.weeksRemaining === null || o.weeksRemaining > 0).length || null} />
         <TabButton active={tab === 'legend'} onClick={() => setTab('legend')} icon={<Award size={15} />} label='Leyenda' />
       </Panel>
 
@@ -851,17 +883,17 @@ export const CareerView = ({
                   </p>
 
                   <div className='space-y-2 pt-1'>
-                    {/* Botón directo para ir a jugar la Champions League */}
-                    {onOpenChampions && (
+                    {/* Botón directo de Champions League cuando el equipo está clasificado o en disputa */}
+                    {isClQualified && (
                       <button
-                        onClick={onOpenChampions}
+                        onClick={() => setTab('cl')}
                         className='w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:to-indigo-500 text-white py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest active:scale-95 transition-all shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 border border-blue-400/40'
                       >
                         <Trophy size={16} className='text-yellow-300 animate-pulse' />
                         {championsFinished
-                          ? 'Ver Cuadro de Champions League'
+                          ? 'Ver Hub de Champions League'
                           : !allLeaguesFinished
-                            ? 'Simular Resto de Ligas y Jugar Champions League'
+                            ? 'Simular Resto de Ligas y Jugar Champions'
                             : 'Jugar Champions League'}
                       </button>
                     )}
@@ -1011,8 +1043,8 @@ export const CareerView = ({
                     </div>
                     <div className='text-right'>
                       <p className='text-[8px] font-black uppercase tracking-widest text-slate-400'>Tu salida</p>
-                      <p className='text-[10px] font-bold text-amber-300'>
-                        {(career.tactic || base).att}/{(career.tactic || base).opp}/{(career.tactic || base).def}
+                      <p className={`text-[10px] font-bold ${activeInjury ? 'text-rose-300' : 'text-amber-300'}`}>
+                        {effectiveTactic.att}/{effectiveTactic.opp}/{effectiveTactic.def}
                       </p>
                     </div>
                   </div>
@@ -1735,44 +1767,19 @@ export const CareerView = ({
             </Panel>
           )}
 
-          {tab === 'cl' && cl && (
-            <Panel className='p-5'>
-              <div className='flex items-center justify-between'>
-                <div>
-                  <p className='text-[9px] font-black uppercase tracking-widest text-blue-400'>Competición Continental</p>
-                  <h3 className='text-base font-black uppercase italic text-white mt-0.5'>{cl.compName || 'Champions League'}</h3>
-                </div>
-                <div className='w-10 h-10 rounded-2xl bg-blue-500/20 text-blue-400 flex items-center justify-center'>
-                  <Trophy size={20} />
-                </div>
-              </div>
-
-              <div className='grid grid-cols-4 gap-2 mt-4'>
-                {[
-                  { k: 'PJ', v: cl.p || 0 },
-                  { k: 'PTS', v: cl.pts || 0 },
-                  { k: 'GF', v: cl.gf || 0 },
-                  { k: 'GC', v: cl.ga || 0 }
-                ].map(s => (
-                  <div key={s.k} className='bg-black/25 rounded-xl py-2 text-center'>
-                    <p className='text-[8px] font-black uppercase text-slate-400'>{s.k}</p>
-                    <p className='text-sm font-black text-white tabular-nums'>{s.v}</p>
-                  </div>
-                ))}
-              </div>
-
-              {cl.rivalName && (
-                <p className='text-[10px] font-bold text-slate-200 mt-4'>
-                  Próximo cruce europeo: <span className='text-white font-black'>{cl.rivalName}</span>
-                </p>
-              )}
-              <button
-                onClick={onOpenChampions}
-                className='mt-4 w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-4 rounded-2xl text-[10px] font-black uppercase italic tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg'
-              >
-                <Dices size={15} /> Ir a la Champions global
-              </button>
-            </Panel>
+          {tab === 'cl' && (
+            <CareerChampionsHub
+              career={career}
+              team={team}
+              clComp={clComp}
+              clInfo={clInfo}
+              onPlayChampionsMatch={onPlayChampionsMatch || onOpenChampions}
+              onSimulateChampionsMatch={onSimulateChampionsMatch}
+              onSimulateAllChampions={onSimulateAllChampions}
+              onOpenNewSeason={onNewSeason}
+              onBackToCareer={() => setTab('main')}
+              ui={ui}
+            />
           )}
 
           {tab === 'table' && (
@@ -2038,126 +2045,136 @@ export const CareerView = ({
             <>
               {/* BUZÓN DE PROPUESTAS FORMALES */}
               <Panel className='p-5 space-y-4'>
-                <div className='flex items-center justify-between'>
+                <div className='flex items-center justify-between gap-2 flex-wrap'>
                   <div>
                     <p className='text-[9px] font-black uppercase tracking-widest text-amber-400'>Buzón del Técnico</p>
                     <h3 className='text-base font-black uppercase italic text-white mt-0.5'>Propuestas de Contrato</h3>
                   </div>
-                  <div className='w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center'>
-                    <Sparkles size={20} />
+                  <div className='flex items-center gap-2'>
+                    <div className='hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[8.5px] font-bold'>
+                      <Clock size={11} className='text-amber-400' />
+                      <span>Caducidad a 2 semanas</span>
+                    </div>
+                    <div className='w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center'>
+                      <Sparkles size={20} />
+                    </div>
                   </div>
                 </div>
 
-                {career.offers?.length ? (
-                  <div className='space-y-3 mt-3'>
-                    {career.offers.map(o => (
-                      <div key={o.id} className='bg-gradient-to-br from-black/40 to-slate-900/60 rounded-2xl p-4 border border-white/10 space-y-3'>
-                        <div className='flex items-center justify-between gap-3'>
-                          <div className='flex items-center gap-3'>
-                            <Shield color1={o.color1} color2={o.color2} initial={o.teamName} size='md' isFlag={o.isFlag} />
-                            <div>
-                              <h4 className='text-xs font-black uppercase italic text-white'>{o.teamName}</h4>
-                              <p className='text-[9px] font-bold uppercase text-slate-400'>
-                                {o.compName} · {o.div === 2 ? '2ª División' : '1ª División'} · Tier {o.tier}
-                              </p>
-                            </div>
-                          </div>
-                          <div className='text-right space-y-1'>
-                            <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-800 text-amber-300 border border-white/10'>
-                              {o.profile}
-                            </span>
-                            {o.weeksRemaining !== undefined && o.weeksRemaining !== null && (
-                              <div>
-                                {o.weeksRemaining > 1 ? (
-                                  <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 inline-flex items-center gap-1'>
-                                    <Clock size={10} className='text-amber-400' />
-                                    Expira en {o.weeksRemaining} sem.
-                                  </span>
-                                ) : (
-                                  <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/40 inline-flex items-center gap-1 animate-pulse'>
-                                    <AlertTriangle size={10} className='text-red-400' />
-                                    ¡Última semana!
-                                  </span>
+                {(() => {
+                  const activeOffers = (career.offers || []).filter(o => o.weeksRemaining === undefined || o.weeksRemaining === null || o.weeksRemaining > 0);
+                  return activeOffers.length > 0 ? (
+                    <div className='space-y-3 mt-3'>
+                      {activeOffers.map(o => {
+                        const weeksLeft = o.weeksRemaining !== undefined && o.weeksRemaining !== null ? o.weeksRemaining : 2;
+                        return (
+                          <div key={o.id} className='bg-gradient-to-br from-black/40 to-slate-900/60 rounded-2xl p-4 border border-white/10 space-y-3'>
+                            <div className='flex items-center justify-between gap-3'>
+                              <div className='flex items-center gap-3'>
+                                <Shield color1={o.color1} color2={o.color2} initial={o.teamName} size='md' isFlag={o.isFlag} />
+                                <div>
+                                  <h4 className='text-xs font-black uppercase italic text-white'>{o.teamName}</h4>
+                                  <p className='text-[9px] font-bold uppercase text-slate-400'>
+                                    {o.compName} · {o.div === 2 ? '2ª División' : '1ª División'} · Tier {o.tier}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className='text-right space-y-1'>
+                                <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-800 text-amber-300 border border-white/10'>
+                                  {o.profile}
+                                </span>
+                                <div>
+                                  {weeksLeft > 1 ? (
+                                    <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 inline-flex items-center gap-1'>
+                                      <Clock size={10} className='text-emerald-400' />
+                                      Expira en {weeksLeft} sem.
+                                    </span>
+                                  ) : (
+                                    <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 inline-flex items-center gap-1 animate-pulse'>
+                                      <AlertTriangle size={10} className='text-amber-400' />
+                                      ¡Última semana!
+                                    </span>
+                                  )}
+                                </div>
+                                {o.position && (
+                                  <p className='text-[8px] font-bold text-slate-400 mt-0.5'>
+                                    Posición: {o.position}º ({o.pts} pts)
+                                  </p>
                                 )}
                               </div>
-                            )}
-                            {o.position && (
-                              <p className='text-[8px] font-bold text-slate-400 mt-0.5'>
-                                Posición: {o.position}º ({o.pts} pts)
-                              </p>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Insignia de estado competitivo & Objetivo */}
-                        <div className='bg-black/30 rounded-xl p-2.5 border border-white/5 space-y-1.5'>
-                          {o.standingStatus && (
-                            <div className='flex items-center justify-between text-[8px] font-black uppercase'>
-                              <span className='text-slate-400'>Estado:</span>
-                              <span className='text-amber-300'>{o.standingStatus}</span>
                             </div>
-                          )}
-                          {o.requiredObjective && (
-                            <div className='flex items-center justify-between text-[8px] font-bold'>
-                              <span className='text-slate-400 uppercase'>Exigencia:</span>
-                              <span className='text-slate-200'>{o.requiredObjective}</span>
-                            </div>
-                          )}
 
-                          {/* Lista de objetivos de temporada exigidos por el club oferente */}
-                          {o.contractObjectives?.length > 0 && (
-                            <div className='mt-2 space-y-1 bg-black/40 rounded-xl p-2 border border-white/5'>
-                              <p className='text-[7px] font-black uppercase text-amber-400 tracking-wider flex items-center gap-1'>
-                                <Target size={10} /> Objetivos del Proyecto Deportivo:
-                              </p>
-                              <div className='grid grid-cols-1 sm:grid-cols-2 gap-1'>
-                                {o.contractObjectives.map((obj, oi) => (
-                                  <div key={oi} className='text-[8px] font-bold text-slate-300 flex items-center justify-between bg-slate-900/80 px-2 py-1 rounded border border-white/5'>
-                                    <span className='truncate mr-1 text-slate-200'>{obj.label}</span>
-                                    <span className='text-amber-400 font-black shrink-0'>{obj.targetValue}</span>
+                            {/* Insignia de estado competitivo & Objetivo */}
+                            <div className='bg-black/30 rounded-xl p-2.5 border border-white/5 space-y-1.5'>
+                              {o.standingStatus && (
+                                <div className='flex items-center justify-between text-[8px] font-black uppercase'>
+                                  <span className='text-slate-400'>Estado:</span>
+                                  <span className='text-amber-300'>{o.standingStatus}</span>
+                                </div>
+                              )}
+                              {o.requiredObjective && (
+                                <div className='flex items-center justify-between text-[8px] font-bold'>
+                                  <span className='text-slate-400 uppercase'>Exigencia:</span>
+                                  <span className='text-slate-200'>{o.requiredObjective}</span>
+                                </div>
+                              )}
+
+                              {/* Lista de objetivos de temporada exigidos por el club oferente */}
+                              {o.contractObjectives?.length > 0 && (
+                                <div className='mt-2 space-y-1 bg-black/40 rounded-xl p-2 border border-white/5'>
+                                  <p className='text-[7px] font-black uppercase text-amber-400 tracking-wider flex items-center gap-1'>
+                                    <Target size={10} /> Objetivos del Proyecto Deportivo:
+                                  </p>
+                                  <div className='grid grid-cols-1 sm:grid-cols-2 gap-1'>
+                                    {o.contractObjectives.map((obj, oi) => (
+                                      <div key={oi} className='text-[8px] font-bold text-slate-300 flex items-center justify-between bg-slate-900/80 px-2 py-1 rounded border border-white/5'>
+                                        <span className='truncate mr-1 text-slate-200'>{obj.label}</span>
+                                        <span className='text-amber-400 font-black shrink-0'>{obj.targetValue}</span>
+                                      </div>
+                                    ))}
                                   </div>
-                                ))}
-                              </div>
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
 
-                        <p className='text-[9px] font-bold text-slate-300 leading-snug italic'>
-                          "{o.reason}"
-                        </p>
+                            <p className='text-[9px] font-bold text-slate-300 leading-snug italic'>
+                              "{o.reason}"
+                            </p>
 
-                        <div className='flex items-center gap-2 pt-1'>
-                          <button
-                            onClick={() => {
-                              if (onAcceptOffer) {
-                                onAcceptOffer(o);
-                              } else {
-                                setPendingSigningOffer(o);
-                              }
-                            }}
-                            className='flex-grow bg-gradient-to-r from-amber-500 to-yellow-600 text-slate-950 py-2.5 rounded-xl text-[9px] font-black uppercase italic tracking-widest active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow-md'
-                          >
-                            <FileSignature size={13} /> Firmar Contrato ({CONTRACT_SEASONS} Temporadas)
-                          </button>
-                          {onRejectOffer && (
-                            <button
-                              onClick={() => onRejectOffer(o.id)}
-                              className='px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-red-950/60 text-slate-400 hover:text-red-300 border border-white/10 text-[9px] font-black uppercase active:scale-95 transition-all'
-                            >
-                              Rechazar
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className='text-center py-6 bg-black/20 rounded-2xl border border-white/5'>
-                    <Sparkles size={24} className='text-slate-600 mx-auto mb-2' />
-                    <p className='text-[10px] font-bold text-slate-300'>Ningún club ha presentado oferta formal todavía.</p>
-                    <p className='text-[8px] font-bold text-slate-500 mt-0.5'>Postúlate en la pestaña Empleo o supera las expectativas de la directiva.</p>
-                  </div>
-                )}
+                            <div className='flex items-center gap-2 pt-1'>
+                              <button
+                                onClick={() => {
+                                  if (onAcceptOffer) {
+                                    onAcceptOffer(o);
+                                  } else {
+                                    setPendingSigningOffer(o);
+                                  }
+                                }}
+                                className='flex-grow bg-gradient-to-r from-amber-500 to-yellow-600 text-slate-950 py-2.5 rounded-xl text-[9px] font-black uppercase italic tracking-widest active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow-md'
+                              >
+                                <FileSignature size={13} /> Firmar Contrato ({CONTRACT_SEASONS} Temporadas)
+                              </button>
+                              {onRejectOffer && (
+                                <button
+                                  onClick={() => onRejectOffer(o.id)}
+                                  className='px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-red-950/60 text-slate-400 hover:text-red-300 border border-white/10 text-[9px] font-black uppercase active:scale-95 transition-all'
+                                >
+                                  Rechazar
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className='text-center py-6 bg-black/20 rounded-2xl border border-white/5'>
+                      <Sparkles size={24} className='text-slate-600 mx-auto mb-2' />
+                      <p className='text-[10px] font-bold text-slate-300'>El buzón está vacío en este momento.</p>
+                      <p className='text-[8px] font-bold text-slate-500 mt-0.5'>Las ofertas recibidas permanecen 2 semanas oficiales antes de expirar si no se firman.</p>
+                    </div>
+                  );
+                })()}
               </Panel>
 
               {/* CARTAS DE RESOLUCIÓN DE CANDIDATURAS RECIENTES */}
@@ -2559,22 +2576,30 @@ export const CareerMatchView = ({ matchState, rolling, onRoll, onFinish, ui }) =
   const { Shield, DieIcon, PenaltyDots } = ui;
   if (!matchState) return null;
 
+  const isChampions = matchState.isChampions || matchState.careerChampionsMatch;
+
   return (
     <div className='flex-grow flex flex-col px-4'>
       <div className='flex justify-between items-center mb-4 py-2'>
         <div className='w-10' />
         <div className='flex flex-col items-center gap-1'>
-          <div className='px-4 py-1 bg-red-600/80 backdrop-blur-md rounded-full text-[9px] font-black uppercase italic animate-pulse shadow-md'>
-            En Directo
+          <div className={`px-4 py-1 backdrop-blur-md rounded-full text-[9px] font-black uppercase italic animate-pulse shadow-md ${
+            isChampions ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border border-blue-400/40' : 'bg-red-600/80 text-white'
+          }`}>
+            {isChampions ? '⭐ UEFA Champions League' : 'En Directo'}
           </div>
           <span className='text-[8px] font-black uppercase italic text-slate-300 tracking-wider'>
-            Jornada de Liga
+            {isChampions ? (matchState.championsPhase ? clPhaseLabel(matchState.championsPhase) : 'Noche Europea') : 'Jornada de Liga'}
           </span>
         </div>
         <div className='w-10' />
       </div>
 
-      <div className='bg-slate-900/40 backdrop-blur-md rounded-[2.5rem] p-6 mb-4 border-b-4 border-slate-800 relative shadow-xl'>
+      <div className={`backdrop-blur-md rounded-[2.5rem] p-6 mb-4 border-b-4 relative shadow-xl ${
+        isChampions
+          ? 'bg-gradient-to-br from-blue-950/60 via-slate-900/60 to-indigo-950/60 border-blue-700/60 shadow-blue-500/10'
+          : 'bg-slate-900/40 border-slate-800'
+      }`}>
         <div className='flex items-center'>
           <div className='flex-1 flex flex-col items-center text-center'>
             {matchState.phase === 'penalties' && PenaltyDots && <PenaltyDots history={matchState.penalties?.historyH} />}
