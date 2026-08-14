@@ -2734,7 +2734,11 @@ export const CareerView = ({
         onClose={() => setShowEndSeasonModal(false)}
         onGoToInbox={() => setTab('market')}
         onOpenReview={onOpenReview}
-        onOpenChampions={onOpenChampions}
+        onOpenChampions={() => {
+          setShowEndSeasonModal(false);
+          if (onOpenChampions) onOpenChampions();
+          setTab('cl');
+        }}
         onNewSeason={onNewSeason}
         championsFinished={championsFinished}
         allLeaguesFinished={allLeaguesFinished}
