@@ -520,29 +520,66 @@ export const seasonObjectives = ({
 
   // 5) Objetivo Continental (UEFA Champions League)
   if (clQualified) {
-    const isChampionsFinal = clPhase === 'Final';
-    const isChampionsSemis = clPhase === 'Semis';
-    const clLabel = tier >= 4 || isChampionsFinal || isChampionsSemis
-      ? 'Conquistar la UEFA Champions League'
-      : 'Avanzar a rondas eliminatorias de Champions';
+    const clTarget = getChampionsObjectiveTarget(tier);
+    const targetRank = CL_PHASE_ORDER.indexOf(clTarget.targetPhase);
+    const currentRank = CL_PHASE_ORDER.indexOf(clPhase || 'groups');
+
+    let clDone = false;
+    let clProgress = 20;
+    let clStatus: 'completed' | 'on_track' | 'at_risk' | 'failed' = 'on_track';
+    let clStatusLabel = 'En Carrera';
+
+    if (clChampion) {
+      clDone = true;
+      clProgress = 100;
+      clStatus = 'completed';
+      clStatusLabel = '🏆 ¡Campeón de Europa!';
+    } else if (clEliminated) {
+      if (currentRank >= targetRank) {
+        clDone = true;
+        clProgress = 100;
+        clStatus = 'completed';
+        clStatusLabel = 'Objetivo Cumplido';
+      } else {
+        clDone = false;
+        clProgress = Math.max(10, Math.round((currentRank / (targetRank || 1)) * 80));
+        clStatus = 'failed';
+        clStatusLabel = '❌ Eliminado';
+      }
+    } else {
+      // Sigue vivo en competición
+      if (currentRank >= targetRank) {
+        clDone = true;
+        clProgress = 100;
+        clStatus = 'completed';
+        clStatusLabel = 'Objetivo Alcanzado';
+      } else {
+        clDone = false;
+        clProgress = Math.max(20, Math.min(90, Math.round(((currentRank + 1) / (targetRank + 1)) * 90)));
+        clStatus = 'on_track';
+        clStatusLabel = `En ${clPhaseLabel(clPhase)}`;
+      }
+    }
 
     items.push({
       key: 'champions',
       category: 'Continental',
-      priority: 'Muy Alta',
-      extra: true,
-      label: clLabel,
+      priority: tier >= 4 ? 'Crítica' : 'Muy Alta',
+      extra: false,
+      label: clTarget.label,
       detail: clChampion
-        ? '🏆 ¡Campeón de Europa!'
+        ? '🏆 ¡Hito histórico: Campeón de la UEFA Champions League!'
         : clEliminated
-          ? '❌ Eliminado de la competición'
-          : `Fase actual en curso: ${clPhaseLabel(clPhase)}`,
-      done: clChampion,
-      progress: clChampion ? 100 : clEliminated ? 0 : 65,
-      currentValue: clChampion ? 'Campeón' : clEliminated ? 'Eliminado' : clPhaseLabel(clPhase),
-      targetValue: 'Título / Rondas KO',
-      status: clChampion ? 'completed' : clEliminated ? 'failed' : 'on_track',
-      statusLabel: clChampion ? 'Campeón' : clEliminated ? 'Eliminado' : 'En Curso'
+          ? `Eliminado en ${clPhaseLabel(clPhase)} (Exigencia: ${clTarget.targetValue})`
+          : `${clTarget.detail} · Fase actual: ${clPhaseLabel(clPhase)}`,
+      done: clDone,
+      progress: clProgress,
+      currentValue: clChampion ? 'Campeón' : clEliminated ? `Eliminado (${clPhaseLabel(clPhase)})` : clPhaseLabel(clPhase),
+      targetValue: clTarget.targetValue,
+      status: clStatus,
+      statusLabel: clStatusLabel,
+      rewardPe: clTarget.pe,
+      rewardRep: clTarget.rep
     });
   } else if (div === 1 && tier >= 3) {
     const isClSpot = played > 0 && !!position && position <= CL_SPOTS;
@@ -638,17 +675,59 @@ export const calculateBoardConfidence = ({
  */
 export const CL_PHASE_ORDER = ['groups', 'Octavos', 'Cuartos', 'Semis', 'Final', 'Terminado'];
 
-export const clPhaseLabel = (phase) => ({
+export const clPhaseLabel = (phase?: string | null) => ({
   groups: 'Fase de grupos',
   Octavos: 'Octavos de final',
   Cuartos: 'Cuartos de final',
   Semis: 'Semifinales',
-  Final: 'Final',
+  Final: 'Gran Final',
   Terminado: 'Torneo terminado'
-}[phase] || 'Fase de grupos');
+}[phase || ''] || 'Fase de grupos');
+
+/** Determina el objetivo de Champions League según el Tier y fuerza del club */
+export const getChampionsObjectiveTarget = (tier: number = 1) => {
+  if (tier >= 4) {
+    return {
+      targetPhase: 'Final',
+      label: 'Conquistar la UEFA Champions League',
+      detail: 'La junta directiva exige coronarse Campeón de Europa',
+      targetValue: '🏆 Campeón',
+      pe: 10,
+      rep: 8.0
+    };
+  }
+  if (tier === 3) {
+    return {
+      targetPhase: 'Semis',
+      label: 'Alcanzar Semifinales de Champions',
+      detail: 'Exigencia continental: alcanzar como mínimo las Semifinales',
+      targetValue: 'Semifinales',
+      pe: 8,
+      rep: 5.0
+    };
+  }
+  if (tier === 2) {
+    return {
+      targetPhase: 'Cuartos',
+      label: 'Alcanzar Cuartos de Final de Champions',
+      detail: 'Objetivo europeo: superar la fase de grupos y los Octavos',
+      targetValue: 'Cuartos de Final',
+      pe: 6,
+      rep: 4.0
+    };
+  }
+  return {
+    targetPhase: 'Octavos',
+    label: 'Superar la Fase de Grupos de Champions',
+    detail: 'Hazaña europea: clasificar a Octavos (Top 2 del grupo)',
+    targetValue: 'Octavos de Final',
+    pe: 5,
+    rep: 3.0
+  };
+};
 
 /** Reputación por el recorrido europeo del club en la Champions global. */
-export const clProgressRep = ({ champion = false, phaseReached = null, played = false } = {}) => {
+export const clProgressRep = ({ champion = false, phaseReached = null, played = false }: { champion?: boolean; phaseReached?: string | null; played?: boolean } = {}) => {
   if (champion) return 8;
   if (!played) return 0;
   const idx = CL_PHASE_ORDER.indexOf(phaseReached || 'groups');
@@ -827,7 +906,8 @@ export const buildOffers = ({
       step: c.tier > currentTier ? 'up' : c.tier === currentTier ? 'same' : 'down',
       profile: c.tier >= 4 ? 'Gigante Europeo' : c.tier >= 3 ? 'Club Dominante' : c.tier === 2 ? 'Media Tabla / Aspirante' : 'Proyecto Modesto',
       seasons: CONTRACT_SEASONS,
-      reason: reasonFor(c)
+      reason: reasonFor(c),
+      weeksRemaining: 2
     };
   });
 };
