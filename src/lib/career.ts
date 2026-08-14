@@ -1236,78 +1236,102 @@ export const careerSpells = (history = []) => {
   return spells.reverse();
 };
 
-export const SPECIAL_OFFICE_WEEKS = [
-  {
-    week: 1,
-    triggerAfterMd: 0,
-    title: 'Apertura de Mercado de Verano',
-    subtitle: 'Planificación de Temporada y Mercado Laboral',
-    desc: 'Ventana oficial de fichajes y contratación de directores técnicos antes del arranque de la liga. Momento ideal para postularte a un nuevo banquillo.',
-    isMarket: true
-  },
-  {
-    week: 8,
-    triggerAfterMd: 6,
-    title: 'Parón Internacional · Semana de Oficina',
-    subtitle: 'Ventana FIFA de Selecciones',
-    desc: 'Semana de descanso liguero por compromisos internacionales. Trabajo de táctica y recuperación física en la ciudad deportiva.',
-    isMarket: false
-  },
-  {
-    week: 16,
-    triggerAfterMd: 13,
-    title: 'Parón Internacional · Semana de Oficina',
-    subtitle: 'Compromisos Internacionales',
-    desc: 'Parón en las principales ligas europeas. Sesión de preparación y análisis del rendimiento tras la primera parte del torneo.',
-    isMarket: false
-  },
-  {
-    week: 23,
-    triggerAfterMd: 19,
-    title: 'Apertura de Mercado de Invierno',
-    subtitle: 'Ecuador del Campeonato y Mercado Laboral',
-    desc: 'Concluida la primera vuelta (Jornada 19), se abre la ventana de invierno para relevo y contratación de técnicos en crisis o proyectos ambiciosos.',
-    isMarket: true
-  },
-  {
-    week: 32,
-    triggerAfterMd: 27,
-    title: 'Parón Internacional · Semana de Oficina',
-    subtitle: 'Último Parón Internacional',
-    desc: 'Última ventana FIFA antes de afrontar las jornadas decisivas del campeonato. Ajustes tácticos y preparación física final.',
-    isMarket: false
-  }
-];
+export const getSpecialOfficeWeeks = (totalLeagueMatchdays = 38) => {
+  const totalRounds = Math.max(10, totalLeagueMatchdays || 38);
+  const midPoint = Math.floor(totalRounds / 2); // J17 en 34 (NL/Alemania), J19 en 38, J21 en 42
+  const break1 = Math.max(4, Math.round(totalRounds * 0.16)); // J5-J6
+  const break2 = Math.max(break1 + 4, Math.round(totalRounds * 0.35)); // J12-J13
+  const break3 = Math.max(midPoint + 4, Math.round(totalRounds * 0.72)); // J24 en 34, J27 en 38
 
-export const calculateCurrentSeasonWeek = (matchdaysPlayed = 0, completedOfficeWeeks = []) => {
+  const w1 = 1;
+  const wBreak1 = break1 + 2;
+  const wBreak2 = break2 + 3;
+  const wWinter = midPoint + 4;
+  const wBreak3 = break3 + 5;
+
+  return [
+    {
+      week: w1,
+      triggerAfterMd: 0,
+      title: 'Apertura de Mercado de Verano',
+      subtitle: 'Planificación de Temporada y Mercado Laboral',
+      desc: 'Ventana oficial de fichajes y contratación de directores técnicos antes del arranque de la liga. Momento ideal para postularte a un nuevo banquillo.',
+      isMarket: true
+    },
+    {
+      week: wBreak1,
+      triggerAfterMd: break1,
+      title: 'Parón Internacional · Semana de Oficina',
+      subtitle: 'Ventana FIFA de Selecciones',
+      desc: `Semana de descanso liguero por compromisos internacionales (tras la Jornada ${break1}). Trabajo de táctica y recuperación física en la ciudad deportiva.`,
+      isMarket: false
+    },
+    {
+      week: wBreak2,
+      triggerAfterMd: break2,
+      title: 'Parón Internacional · Semana de Oficina',
+      subtitle: 'Compromisos Internacionales',
+      desc: `Parón en las principales ligas europeas (tras la Jornada ${break2}). Sesión de preparación y análisis del rendimiento tras el primer tercio del torneo.`,
+      isMarket: false
+    },
+    {
+      week: wWinter,
+      triggerAfterMd: midPoint,
+      title: 'Apertura de Mercado de Invierno',
+      subtitle: 'Ecuador del Campeonato y Mercado Laboral',
+      desc: `Concluida la primera vuelta (Jornada ${midPoint} de ${totalRounds}), se abre la ventana oficial de invierno para relevo y contratación de técnicos en crisis o proyectos ambiciosos.`,
+      isMarket: true
+    },
+    {
+      week: wBreak3,
+      triggerAfterMd: break3,
+      title: 'Parón Internacional · Semana de Oficina',
+      subtitle: 'Último Parón Internacional',
+      desc: `Última ventana FIFA antes de afrontar las jornadas decisivas del campeonato (tras la Jornada ${break3}). Ajustes tácticos y preparación física final.`,
+      isMarket: false
+    }
+  ];
+};
+
+export const SPECIAL_OFFICE_WEEKS = getSpecialOfficeWeeks(38);
+
+export const calculateCurrentSeasonWeek = (matchdaysPlayed = 0, completedOfficeWeeks = [], totalLeagueMatchdays = 38) => {
   const completed = Array.isArray(completedOfficeWeeks) ? completedOfficeWeeks : [];
+  const officeWeeks = getSpecialOfficeWeeks(totalLeagueMatchdays).sort((a, b) => a.triggerAfterMd - b.triggerAfterMd || a.week - b.week);
+  const totalWeeks = (totalLeagueMatchdays || 38) + officeWeeks.length;
   
-  // 1. Comprobar si hay una semana especial de oficina pendiente justo en esta jornada
-  const activeOffice = SPECIAL_OFFICE_WEEKS.find(w => matchdaysPlayed === w.triggerAfterMd && !completed.includes(w.week));
+  // 1. Comprobar si hay una semana especial de oficina pendiente que corresponda a las jornadas disputadas
+  // Se busca la primera en orden cronológico donde se haya alcanzado su trigger y no haya sido completada aún
+  const activeOffice = officeWeeks.find(w => matchdaysPlayed >= w.triggerAfterMd && !completed.includes(w.week));
   if (activeOffice) {
     return {
       week: activeOffice.week,
       isOfficeWeek: true,
-      isMarketOpen: activeOffice.isMarket,
-      officeInfo: activeOffice
+      isMarketOpen: !!activeOffice.isMarket,
+      officeInfo: activeOffice,
+      totalWeeks
     };
   }
 
-  // 2. Si no es semana de oficina activa, calcular el número de semana de calendario (1 a 43)
+  // 2. Si no es semana de oficina activa, calcular el número de semana de calendario (1 a totalWeeks)
   let officeOffset = 0;
-  if (completed.includes(1) || matchdaysPlayed > 0) officeOffset += 1;
-  if (completed.includes(8) || matchdaysPlayed >= 7) officeOffset += 1;
-  if (completed.includes(16) || matchdaysPlayed >= 14) officeOffset += 1;
-  if (completed.includes(23) || matchdaysPlayed >= 20) officeOffset += 1;
-  if (completed.includes(32) || matchdaysPlayed >= 28) officeOffset += 1;
+  officeWeeks.forEach(ow => {
+    if (completed.includes(ow.week)) {
+      officeOffset += 1;
+    }
+  });
 
-  const week = Math.min(43, Math.max(1, matchdaysPlayed + officeOffset + (completed.includes(1) ? 0 : 1)));
+  const week = Math.min(totalWeeks, Math.max(1, matchdaysPlayed + officeOffset + 1));
+
+  // Comprobar si la semana calculada coincide con un mercado de fichajes
+  const isMarketPeriod = officeWeeks.some(ow => ow.isMarket && (ow.week === week || (matchdaysPlayed >= ow.triggerAfterMd && !completed.includes(ow.week))));
 
   return {
     week,
     isOfficeWeek: false,
-    isMarketOpen: false,
-    officeInfo: null
+    isMarketOpen: isMarketPeriod,
+    officeInfo: null,
+    totalWeeks
   };
 };
 
