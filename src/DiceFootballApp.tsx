@@ -4170,14 +4170,187 @@ function DiceFootballApp() {
     finishCareerChampionsMatch(simH, simA, penalties, { home, away });
   };
 
-  // Simulación de todo el torneo Champions League restante
-  const simulateAllCareerChampions = () => {
+  // Simulación completa de una copa / torneo hasta su finalización en una sola ejecución pura
+  const simulateEntireCupToFinish = (initialComp: any) => {
+    if (!initialComp || initialComp.type === 'league') return initialComp;
+    let comp = JSON.parse(JSON.stringify(initialComp));
     let guard = 0;
-    while (guard++ < 20) {
-      const c1 = comps['C1'];
-      if (!c1 || c1.phase === 'Terminado' || c1.showWinner) break;
-      processCupRound(null, 'C1', true);
+
+    while (guard++ < 40) {
+      if (comp.phase === 'Terminado' || comp.showWinner) break;
+
+      if (comp.phase === 'groups') {
+        const isWorldCup = comp.id === 'C2';
+        const maxMatchdays = isWorldCup ? 3 : 6;
+        const results: any[] = [];
+
+        (comp.groups || []).forEach((group: any) => {
+          const groupTeams = (comp.teams || []).filter((t: any) => group.teamIds?.includes(t.id));
+          const schedule = generateLeagueSchedule(groupTeams, !isWorldCup);
+          const currentRound = schedule[(comp.matchday || 0) % maxMatchdays];
+          if (currentRound) {
+            currentRound.forEach((m: any) => {
+              const h = (comp.teams || []).find((t: any) => t.id === m.homeId);
+              const a = (comp.teams || []).find((t: any) => t.id === m.awayId);
+              let sh = 0, sa = 0;
+              for (let i = 0; i < (h?.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (h?.att || 0) && Math.floor(Math.random() * 6) + 1 > (a?.def || 0)) sh++;
+              for (let i = 0; i < (a?.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (a?.att || 0) && Math.floor(Math.random() * 6) + 1 > (h?.def || 0)) sa++;
+              results.push({ hId: m.homeId, aId: m.awayId, sh, sa, penH: null, penA: null });
+            });
+          }
+        });
+
+        const updatedTeams = (comp.teams || []).map((t: any) => {
+          const res = results.find(r => r.hId === t.id || r.aId === t.id);
+          if (!res) return t;
+          const isHome = res.hId === t.id;
+          const gf = isHome ? res.sh : res.sa;
+          const ga = isHome ? res.sa : res.sh;
+          const w = gf > ga ? 1 : 0;
+          const d = gf === ga ? 1 : 0;
+          const l = gf < ga ? 1 : 0;
+          return {
+            ...t,
+            p: (t.p || 0) + 1,
+            w: (t.w || 0) + w,
+            d: (t.d || 0) + d,
+            l: (t.l || 0) + l,
+            gf: (t.gf || 0) + gf,
+            ga: (t.ga || 0) + ga,
+            pts: (t.pts || 0) + (w * 3 + d)
+          };
+        });
+
+        const nextMatchday = (comp.matchday || 0) + 1;
+        const isEndOfGroups = nextMatchday >= maxMatchdays;
+        let newBracket = comp.bracket;
+        if (isEndOfGroups) {
+          newBracket = generateKnockoutBrackets({ ...comp, teams: updatedTeams });
+        }
+
+        comp = {
+          ...comp,
+          teams: updatedTeams,
+          history: [{ day: 'Jornada ' + nextMatchday, results }, ...(comp.history || [])],
+          matchday: nextMatchday,
+          phase: isEndOfGroups ? (newBracket?.Octavos ? 'Octavos' : 'Cuartos') : 'groups',
+          bracket: newBracket
+        };
+      } else {
+        // Knockout
+        const isChampions = comp.id === 'C1';
+        const phase = comp.phase;
+        const isVuelta = isChampions && (comp.matchday || 0) % 2 !== 0 && phase !== 'Final';
+        const newBracket = { ...comp.bracket };
+        const matchesToProcess = Array.isArray(newBracket[phase]) ? newBracket[phase] : [newBracket[phase]].filter(Boolean);
+        const allResults: any[] = [];
+
+        matchesToProcess.forEach((m: any) => {
+          if (!m) return;
+          const homeId = isVuelta ? m.aId : m.hId;
+          const awayId = isVuelta ? m.hId : m.aId;
+          const h = (comp.teams || []).find((t: any) => t.id === homeId);
+          const a = (comp.teams || []).find((t: any) => t.id === awayId);
+          let simH = 0, simA = 0;
+          for (let i = 0; i < (h?.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (h?.att || 0) && Math.floor(Math.random() * 6) + 1 > (a?.def || 0)) simH++;
+          for (let i = 0; i < (a?.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (a?.att || 0) && Math.floor(Math.random() * 6) + 1 > (h?.def || 0)) simA++;
+
+          const matchSh = isVuelta ? simA : simH;
+          const matchSa = isVuelta ? simH : simA;
+          let penH: any = null, penA: any = null;
+
+          const isDraw = (isChampions && isVuelta && phase !== 'Final')
+            ? ((m.sh || 0) + matchSh === (m.sa || 0) + matchSa)
+            : (matchSh === matchSa);
+
+          if (isDraw && (!isChampions || isVuelta || phase === 'Final')) {
+            let spH = 0, spA = 0, shH = 0, shA = 0;
+            const sim = (att: number, def: number) => (Math.floor(Math.random() * 6) + 1 <= att && Math.floor(Math.random() * 6) + 1 > def);
+            for (let i = 0; i < 5; i++) {
+              if (sim(h?.att || 1, a?.def || 1)) spH++; shH++;
+              if (spH > spA + (5 - shA) || spA > spH + (5 - shH)) break;
+              if (sim(a?.att || 1, h?.def || 1)) spA++; shA++;
+              if (spH > spA + (5 - shA) || spA > spH + (5 - shH)) break;
+            }
+            while (spH === spA) {
+              if (sim(h?.att || 1, a?.def || 1)) spH++;
+              if (sim(a?.att || 1, h?.def || 1)) spA++;
+            }
+            penH = isVuelta ? spA : spH;
+            penA = isVuelta ? spH : spA;
+          }
+
+          if (isVuelta) {
+            m.sh2 = matchSh;
+            m.sa2 = matchSa;
+          } else {
+            m.sh = matchSh;
+            m.sa = matchSa;
+          }
+          if (penH !== null) {
+            m.penH = penH;
+            m.penA = penA;
+          }
+          allResults.push(isVuelta
+            ? { hId: m.aId, aId: m.hId, sh: matchSa, sa: matchSh, penH: penA, penA: penH }
+            : { hId: m.hId, aId: m.aId, sh: matchSh, sa: matchSa, penH, penA }
+          );
+        });
+
+        let nextPhase = phase;
+        let showWinner = false;
+        if (!isChampions || isVuelta || phase === 'Final') {
+          const winners = matchesToProcess.map((m: any) => {
+            const tH = isChampions && phase !== 'Final' ? ((m.sh || 0) + (m.sh2 || 0)) : (m.sh || 0);
+            const tA = isChampions && phase !== 'Final' ? ((m.sa || 0) + (m.sa2 || 0)) : (m.sa || 0);
+            if (tH > tA) return m.hId;
+            if (tA > tH) return m.aId;
+            return (m.penH || 0) > (m.penA || 0) ? m.hId : m.aId;
+          });
+
+          if (phase === 'Octavos') {
+            nextPhase = 'Cuartos';
+            newBracket.Cuartos = Array(4).fill(0).map((_, i) => ({ id: 'C' + (i + 1), hId: winners[i * 2], aId: winners[i * 2 + 1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null }));
+          } else if (phase === 'Cuartos') {
+            nextPhase = 'Semis';
+            newBracket.Semis = Array(2).fill(0).map((_, i) => ({ id: 'S' + (i + 1), hId: winners[i * 2], aId: winners[i * 2 + 1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null }));
+          } else if (phase === 'Semis') {
+            nextPhase = 'Final';
+            newBracket.Final = [{ id: 'F1', hId: winners[0], aId: winners[1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null }];
+          } else {
+            nextPhase = 'Terminado';
+            showWinner = true;
+          }
+        }
+
+        comp = {
+          ...comp,
+          history: [{ day: phase + (isChampions ? (isVuelta ? ' (Vuelta)' : ' (Ida)') : ''), results: allResults }, ...(comp.history || [])],
+          matchday: (comp.matchday || 0) + 1,
+          phase: nextPhase,
+          bracket: newBracket,
+          showWinner
+        };
+      }
     }
+
+    return comp;
+  };
+
+  // Simulación de todo el torneo Champions League restante hasta coronar al campeón
+  const simulateAllCareerChampions = () => {
+    setComps(prev => {
+      const c1 = prev['C1'];
+      if (!c1 || c1.phase === 'Terminado' || c1.showWinner) return prev;
+      const finishedC1 = simulateEntireCupToFinish(c1);
+      if (finishedC1.showWinner) {
+        archiveCompetition('C1', 1);
+      }
+      return {
+        ...prev,
+        C1: finishedC1
+      };
+    });
   };
 
 
