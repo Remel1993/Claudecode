@@ -2896,6 +2896,7 @@ function DiceFootballApp() {
     die: number;
     physioCost: number;
     categoryLabel: string;
+    isChampions?: boolean;
   } | null>(null);
 
   const careerComp = comps[career.compId] || comps[CAREER_LEAGUE_ID];
@@ -3097,6 +3098,14 @@ function DiceFootballApp() {
     }));
   };
 
+  const currentMatchKey = useMemo(() => {
+    const cl = comps['C1'];
+    if (seasonState.phase === 'champions' || (cl?.teams?.length && cl.phase && cl.phase !== 'Terminado')) {
+      return `cl-${seasonState.season || 1}-${cl.phase || 'groups'}-${cl.matchday || 0}`;
+    }
+    return `league-${seasonState.season || 1}-${career.div || 1}-${careerMd}`;
+  }, [seasonState.phase, seasonState.season, comps, career.div, careerMd]);
+
   const applyDrillResult = (result) => {
     if (!careerTeam) return;
 
@@ -3120,6 +3129,7 @@ function DiceFootballApp() {
           ...c,
           pe: Math.max(0, (c.pe || 0) - (result.peCost || 0)),
           trainedMatchday: careerMd,
+          trainedMatchKey: currentMatchKey,
           activeInjury: null,
           medicalImmunityWeeks: 3,
           immunityActivatedMatchday: careerMd,
@@ -3131,7 +3141,7 @@ function DiceFootballApp() {
       return;
     }
 
-    // Caso 2: Se aceptó la baja temporal por lesión (baja de -1 sólo durante esta jornada + 3 semanas de inmunidad)
+    // Caso 2: Se aceptó la baja temporal por lesión (baja de -1 sólo durante este partido + 3 semanas de inmunidad)
     if (result.statLost && result.affectedAttr) {
       const attr = result.affectedAttr;
       const attrLabel = attr === 'att' ? 'Ataque' : attr === 'opp' ? 'Ocasiones' : 'Defensa';
@@ -3141,10 +3151,12 @@ function DiceFootballApp() {
         return {
           ...c,
           trainedMatchday: careerMd,
+          trainedMatchKey: currentMatchKey,
           activeInjury: {
             attr,
             label: attrLabel,
             matchday: careerMd,
+            matchKey: currentMatchKey,
             penalty: 1
           },
           // Se activa el escudo de inmunidad médica por 3 jornadas completas
@@ -3163,6 +3175,7 @@ function DiceFootballApp() {
         ...c,
         pe: (c.pe || 0) + result.peGained,
         trainedMatchday: careerMd,
+        trainedMatchKey: currentMatchKey,
         lastTrainingResult: drillFeedback
       }));
       return;
@@ -3172,6 +3185,7 @@ function DiceFootballApp() {
     setCareer(c => ({
       ...c,
       trainedMatchday: careerMd,
+      trainedMatchKey: currentMatchKey,
       lastTrainingResult: drillFeedback
     }));
   };
@@ -3530,8 +3544,8 @@ function DiceFootballApp() {
 
   // Manejador de la decisión del usuario en el Modal de Alerta Médica de Simulación
   const handleSimulationInjuryChoice = (option: 'accept_injury' | 'physio_elite') => {
-    if (!simulationInjuryAlert || !careerFixture || !careerTeam || !careerRival) return;
-    const { affectedAttr, attrLabel, physioCost } = simulationInjuryAlert;
+    if (!simulationInjuryAlert) return;
+    const { affectedAttr, attrLabel, physioCost, isChampions } = simulationInjuryAlert;
 
     let trainingFeedback: any = null;
     let extraPeGained = 0;
@@ -3550,7 +3564,11 @@ function DiceFootballApp() {
         message: `Baja médica aceptada: -1 ${attrLabel} en este partido simulado. Alta médica automática tras el encuentro (+3 sem. Inmunidad Médica).`
       };
       setSimulationInjuryAlert(null);
-      executeCareerSimulatedMatch(affectedAttr, trainingFeedback, 0, 3, true);
+      if (isChampions) {
+        executeCareerChampionsSimulatedMatch(affectedAttr, trainingFeedback, 0, 3, true);
+      } else {
+        executeCareerSimulatedMatch(affectedAttr, trainingFeedback, 0, 3, true);
+      }
     } else {
       // Fisioterapia de Élite: Paga PE y anula la lesión
       extraPeGained = -physioCost;
@@ -3566,7 +3584,11 @@ function DiceFootballApp() {
         message: `Fisioterapia de Élite aplicada (-${physioCost} PE). ¡Lesión cancelada, juegas al 100%! (+3 sem. Inmunidad Médica).`
       };
       setSimulationInjuryAlert(null);
-      executeCareerSimulatedMatch(null, trainingFeedback, extraPeGained, 3, true);
+      if (isChampions) {
+        executeCareerChampionsSimulatedMatch(null, trainingFeedback, extraPeGained, 3, true);
+      } else {
+        executeCareerSimulatedMatch(null, trainingFeedback, extraPeGained, 3, true);
+      }
     }
   };
 
@@ -3580,8 +3602,8 @@ function DiceFootballApp() {
     let injuryOccurredInSim = false;
     let injuryAttr: 'att' | 'opp' | 'def' | null = null;
 
-    // Si aún no entrenó voluntariamente en esta jornada, se simula el entrenamiento con 1D6
-    if (career.trainedMatchday !== careerMd) {
+    // Si aún no entrenó voluntariamente en este partido, se simula el entrenamiento con 1D6
+    if (career.trainedMatchKey !== currentMatchKey && career.trainedMatchday !== careerMd) {
       const die = Math.floor(Math.random() * 6) + 1;
       if (die === 1) {
         extraPeGained = 2;
@@ -3644,7 +3666,8 @@ function DiceFootballApp() {
             attrLabel: attrLabels[affected],
             die: 6,
             physioCost,
-            categoryLabel
+            categoryLabel,
+            isChampions: false
           });
           return;
         }
@@ -3652,7 +3675,7 @@ function DiceFootballApp() {
     } else if (career.lastTrainingResult) {
       trainingFeedback = career.lastTrainingResult;
       // Si ya había entrenado voluntariamente en esta jornada y hubo lesión activa
-      if (career.activeInjury && career.activeInjury.matchday === careerMd) {
+      if (career.activeInjury && (career.activeInjury.matchKey === currentMatchKey || career.activeInjury.matchday === careerMd)) {
         injuryAttr = career.activeInjury.attr;
         injuryOccurredInSim = true;
       }
@@ -3801,22 +3824,23 @@ function DiceFootballApp() {
       return next;
     });
 
-    setCareer(c => (c.active ? { ...c, clSeason: seasonNow } : c));
+    setCareer(c => (c.active ? { ...c, clSeason: seasonNow, clQualified: true } : c));
     setSeasonState(s => ({ ...s, phase: 'champions', globalMatchday: 38 }));
     setActiveCompId('C1');
     setCompView('main');
-    setView('competition');
+    if (!career.active) {
+      setView('competition');
+    } else {
+      setView('career');
+    }
   };
 
-  // Manda al técnico a la Champions global: mismo cuadro, mismos rivales, mismo motor
+  // Manda al técnico a la Champions en el Modo Carrera / Entrenador
   const openCareerChampions = () => {
-    if (comps['C1']?.teams?.length > 0 && seasonState.phase === 'champions') {
-      setActiveCompId('C1');
-      setCompView('main');
-      setView('competition');
-      return;
+    if (!comps['C1']?.teams?.length) {
+      finishAllLeaguesAndOpenChampions();
     }
-    finishAllLeaguesAndOpenChampions();
+    setView('career');
   };
 
   // Inicia un partido de UEFA Champions League para el equipo del modo carrera con dados en directo
@@ -3953,7 +3977,11 @@ function DiceFootballApp() {
     scoreH: number,
     scoreA: number,
     penalties: any = null,
-    simulatedTeams: { home: any; away: any } | null = null
+    simulatedTeams: { home: any; away: any } | null = null,
+    trainingFeedback: any = null,
+    extraTrainingPe: number = 0,
+    nextImmunityWeeks: number | null = null,
+    injuryOccurredInSim: boolean = false
   ) => {
     const clComp = comps['C1'];
     if (!clComp || !careerTeam) {
@@ -3987,8 +4015,10 @@ function DiceFootballApp() {
     );
 
     // 2. Recompensas por partido europeo
-    const peGained = result === 'W' ? (currentPhase === 'Final' ? 6 : 3) : result === 'D' ? 2 : 0;
+    const matchPeGained = result === 'W' ? (currentPhase === 'Final' ? 6 : 3) : result === 'D' ? 2 : 0;
+    const totalPeGained = Math.max(0, matchPeGained + extraTrainingPe);
     const repGained = result === 'W' ? (currentPhase === 'Final' ? 2.5 : 0.8) : result === 'D' ? 0.3 : -0.1;
+    const isChampionsWinner = currentPhase === 'Final' && (result === 'W' || (penalties && (isHome ? penalties.scoreH > penalties.scoreA : penalties.scoreA > penalties.scoreH)));
 
     setCareer(c => {
       const cleanBase = {
@@ -4007,11 +4037,20 @@ function DiceFootballApp() {
         ga: (c.stats?.ga || 0) + myGa
       };
 
+      const resolvedImmunity = nextImmunityWeeks !== null && nextImmunityWeeks !== undefined
+        ? nextImmunityWeeks
+        : injuryOccurredInSim
+        ? 3
+        : Math.max(0, (c.medicalImmunityWeeks || 0) - 1);
+
       return {
         ...c,
-        pe: Math.max(0, (c.pe || 0) + peGained),
+        pe: Math.max(0, (c.pe || 0) + totalPeGained),
         reputation: newRep,
         activeInjury: null,
+        medicalImmunityWeeks: resolvedImmunity,
+        trainedMatchKey: currentMatchKey,
+        clChampion: isChampionsWinner ? true : c.clChampion,
         baseDist: cleanBase,
         tactic: cleanBase,
         stats: newStats,
@@ -4022,13 +4061,18 @@ function DiceFootballApp() {
           myGf,
           myGa,
           result,
-          peGained,
+          peGained: totalPeGained,
+          matchPeGained,
+          trainingPeGained: extraTrainingPe,
+          trainingFeedback,
           repGained,
           headline: `⭐ UEFA Champions League · ${clPhaseLabel(currentPhase)}`,
-          summary: result === 'W'
-            ? `¡Victoria europea! ${myGf}-${myGa} contra ${rivalName}. Sumas +${peGained} PE y +${repGained} reputación.`
+          summary: isChampionsWinner
+            ? `🏆 ¡CAMPEÓN DE LA UEFA CHAMPIONS LEAGUE! Derrotas a ${rivalName} en la Gran Final. Ganancia total: +${totalPeGained} PE (+${matchPeGained} partido${extraTrainingPe ? `, +${extraTrainingPe} entreno` : ''}) y +${repGained} reputación.`
+            : result === 'W'
+            ? `¡Victoria europea! ${myGf}-${myGa} contra ${rivalName}. Sumas +${totalPeGained} PE (+${matchPeGained} partido${extraTrainingPe ? `, +${extraTrainingPe} entreno` : ''}) y +${repGained} reputación.`
             : result === 'D'
-            ? `Empate ${myGf}-${myGa} contra ${rivalName}. Sumas +${peGained} PE y +${repGained} reputación.`
+            ? `Empate ${myGf}-${myGa} contra ${rivalName}. Sumas +${totalPeGained} PE (+${matchPeGained} partido${extraTrainingPe ? `, +${extraTrainingPe} entreno` : ''}) y +${repGained} reputación.`
             : `Derrota ${myGf}-${myGa} contra ${rivalName} en la Champions League.`
         },
         seasonLog: [
@@ -4041,7 +4085,7 @@ function DiceFootballApp() {
             ga: myGa,
             result,
             rep: repGained,
-            pe: peGained
+            pe: totalPeGained
           },
           ...(c.seasonLog || [])
         ].slice(0, 60)
@@ -4052,14 +4096,15 @@ function DiceFootballApp() {
     setView('career');
   };
 
-  // Simulación rápida de un partido de Champions League
-  const simulateCareerChampionsMatch = () => {
+  // Ejecución del partido de Champions simulado
+  const executeCareerChampionsSimulatedMatch = (
+    injuryAttr: 'att' | 'opp' | 'def' | null,
+    trainingFeedback: any,
+    extraTrainingPe: number,
+    nextImmunityWeeks: number | null,
+    injuryOccurredInSim: boolean
+  ) => {
     let clComp = comps['C1'];
-    if (!clComp?.teams?.length) {
-      finishAllLeaguesAndOpenChampions();
-      clComp = comps['C1'];
-    }
-
     if (!clComp?.teams?.length || !careerTeam) return;
 
     const careerClTeam = clComp.teams.find(t => t.id === clComp.careerTeamId) ||
@@ -4076,9 +4121,8 @@ function DiceFootballApp() {
     };
     const tactic = career.tactic ? { ...career.tactic } : { ...baseTeamStats };
     let myFinalStats = { ...tactic };
-    if (career.activeInjury) {
-      const attr = career.activeInjury.attr as 'att' | 'opp' | 'def';
-      if (attr) myFinalStats[attr] = Math.max(1, (myFinalStats[attr] || 1) - 1);
+    if (injuryAttr) {
+      myFinalStats[injuryAttr] = Math.max(1, (myFinalStats[injuryAttr] || baseTeamStats[injuryAttr] || 1) - 1);
     }
 
     let home: any = null, away: any = null;
@@ -4167,7 +4211,99 @@ function DiceFootballApp() {
       }
     }
 
-    finishCareerChampionsMatch(simH, simA, penalties, { home, away });
+    finishCareerChampionsMatch(simH, simA, penalties, { home, away }, trainingFeedback, extraTrainingPe, nextImmunityWeeks, injuryOccurredInSim);
+  };
+
+  // Simulación rápida de un partido de Champions League
+  const simulateCareerChampionsMatch = () => {
+    let clComp = comps['C1'];
+    if (!clComp?.teams?.length) {
+      finishAllLeaguesAndOpenChampions();
+      clComp = comps['C1'];
+    }
+
+    if (!clComp?.teams?.length || !careerTeam) return;
+
+    let trainingFeedback: any = null;
+    let newImmunityWeeks = career.medicalImmunityWeeks || 0;
+    let extraTrainingPe = 0;
+    let injuryOccurredInSim = false;
+    let injuryAttr: 'att' | 'opp' | 'def' | null = null;
+
+    // Si aún no entrenó voluntariamente en este partido de Champions, se simula con 1D6
+    if (career.trainedMatchKey !== currentMatchKey) {
+      const die = Math.floor(Math.random() * 6) + 1;
+      if (die === 1) {
+        extraTrainingPe = 2;
+        trainingFeedback = {
+          simulated: true,
+          die: 1,
+          peGained: 2,
+          injuryOccurred: false,
+          immunityPrevented: false,
+          message: '¡Entrenamiento europeo de alto rendimiento! +2 PE ganados.'
+        };
+      } else if (die === 2) {
+        extraTrainingPe = 1;
+        trainingFeedback = {
+          simulated: true,
+          die: 2,
+          peGained: 1,
+          injuryOccurred: false,
+          immunityPrevented: false,
+          message: '¡Buen entrenamiento táctico! +1 PE ganado.'
+        };
+      } else if (die >= 3 && die <= 5) {
+        trainingFeedback = {
+          simulated: true,
+          die,
+          peGained: 0,
+          injuryOccurred: false,
+          immunityPrevented: false,
+          message: 'Sesión europea regular sin incidencias.'
+        };
+      } else if (die === 6) {
+        const base = {
+          att: Math.max(career.baseDist?.att || 1, careerTeam.att || 1),
+          opp: Math.max(career.baseDist?.opp || 1, careerTeam.opp || 1),
+          def: Math.max(career.baseDist?.def || 1, careerTeam.def || 1)
+        };
+        const tactic = career.tactic ? { ...career.tactic } : { ...base };
+        const attrs: Array<'att' | 'opp' | 'def'> = ['att', 'opp', 'def'].filter(a => (tactic[a] || 1) > 1) as any;
+        const affected: 'att' | 'opp' | 'def' = attrs.length > 0 ? attrs[Math.floor(Math.random() * attrs.length)] : 'att';
+        const attrLabels = { att: 'Ataque (ATT)', opp: 'Ocasiones (OPP)', def: 'Defensa (DEF)' };
+
+        if (newImmunityWeeks > 0) {
+          trainingFeedback = {
+            simulated: true,
+            die: 6,
+            peGained: 0,
+            injuryOccurred: true,
+            immunityPrevented: true,
+            message: `🛡️ ¡Inmunidad Médica activa (${newImmunityWeeks} sem.) evitó la sobrecarga en ${attrLabels[affected]}!`
+          };
+        } else {
+          // Modal de alerta médica de simulación para Champions League
+          setSimulationInjuryAlert({
+            affectedAttr: affected,
+            attrLabel: attrLabels[affected],
+            die: 6,
+            physioCost: 30,
+            categoryLabel: 'UEFA Champions League / Élite',
+            isChampions: true
+          });
+          return;
+        }
+      }
+    } else if (career.lastTrainingResult) {
+      trainingFeedback = career.lastTrainingResult;
+      if (career.activeInjury && career.activeInjury.matchKey === currentMatchKey) {
+        injuryAttr = career.activeInjury.attr;
+        injuryOccurredInSim = true;
+      }
+    }
+
+    executeCareerChampionsSimulatedMatch(injuryAttr, trainingFeedback, extraTrainingPe, newImmunityWeeks, injuryOccurredInSim);
   };
 
   // Simulación completa de una copa / torneo hasta su finalización en una sola ejecución pura
