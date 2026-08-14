@@ -6,14 +6,15 @@ import {
   Briefcase, Target, Sparkles, AlertTriangle, Check, X, Globe, History, Newspaper, Play,
   FileSignature, ShieldCheck, Pencil, CalendarPlus, Dumbbell, Zap, HeartPulse,
   Calendar, Award, ArrowUp, ArrowDown, Minus, CheckCircle, XCircle, ArrowRight, Lock,
-  Plane, Mail
+  Plane, Mail, FastForward, Clock
 } from 'lucide-react';
 import {
   TIERS, CLASS_INFO, classOf, tierCaps, tacticalOptions, sameDist, peCostFor,
   repBand, objectiveFor, expectedPosition, readPerformance, seasonObjectives,
   isSquadMaxed, careerSpells, CONTRACT_SEASONS, CL_SPOTS, signingRepBonus,
   generateRumors, getRejectionReason, getMarketVacancies, SPECIAL_OFFICE_WEEKS,
-  calculateCurrentSeasonWeek, getContractObjectivesForTeam, calculateBoardConfidence
+  getSpecialOfficeWeeks, calculateCurrentSeasonWeek, getContractObjectivesForTeam,
+  calculateBoardConfidence
 } from '../lib/career';
 import { TrainingModal } from './TrainingModal';
 import { TrainingDrillModal } from './TrainingDrillModal';
@@ -21,6 +22,7 @@ import { RumorsTicker } from './RumorsTicker';
 import { SimulationFeedbackBanner } from './SimulationFeedbackBanner';
 import { CareerLegendProfile } from './CareerLegendProfile';
 import { EndSeasonModal } from './EndSeasonModal';
+import { ApplicationResolutionModal } from './ApplicationResolutionModal';
 
 const Panel = ({ children, className = '' }) => (
   <div className={`bg-slate-900/40 backdrop-blur-md rounded-[2rem] border border-white/10 shadow-lg ${className}`}>
@@ -333,7 +335,7 @@ export const CareerView = ({
   onSetTactic, onSpendPE, onOpenReview, onSimulateMatch, clInfo, onOpenChampions,
   onRenameManager, reviewDone, contractSigned, allLeaguesFinished, championsFinished, onNewSeason,
   onApplyTrainingStats, onApplyDrillResult, onAcceptOffer, onRejectOffer, onSubmitApplication,
-  onAdvanceOfficeWeek, onDismissAppResolutionModal,
+  onAdvanceOfficeWeek, onDecideLaterAppOffer, onRejectAppResolution, onDismissAppResolutionModal,
   onDismissSimulationFeedback, allComps, schedule, ui
 }) => {
   const { Shield, FormBadges, DieIcon } = ui;
@@ -378,10 +380,12 @@ export const CareerView = ({
   const seasonsLeft = Math.max(0, (career.contractStart || season) + (career.contractSeasons || CONTRACT_SEASONS) - season);
   const hasTrainedThisMatchday = career.trainedMatchday === currentMatchday;
 
-  // Cálculo del estado del calendario de temporada estilo FIFA/PES (43 semanas: partidos + semanas de oficina/mercado)
+  const totalRoundsCount = Math.max(0, ((standings?.length || 20) - 1) * 2);
+
+  // Cálculo del estado del calendario de temporada estilo FIFA/PES (adaptado dinámicamente a la liga: 34, 38 o 42 jornadas)
   const currentWeekInfo = useMemo(() => {
-    return calculateCurrentSeasonWeek(currentMatchday, career.completedOfficeWeeks || []);
-  }, [currentMatchday, career.completedOfficeWeeks]);
+    return calculateCurrentSeasonWeek(currentMatchday, career.completedOfficeWeeks || [], totalRoundsCount);
+  }, [currentMatchday, career.completedOfficeWeeks, totalRoundsCount]);
 
   // Generador de rumores dinámicos de mercado
   const dynamicRumors = useMemo(() => generateRumors(allComps || {}, career), [allComps, career]);
@@ -395,10 +399,9 @@ export const CareerView = ({
     const d = l.filter((x: any) => x.result === 'D').length;
     const loss = l.filter((x: any) => x.result === 'L').length;
     const totalPlayed = l.length;
-    const totalRoundsCount = Math.max(0, ((standings?.length || 20) - 1) * 2);
     const pending = Math.max(0, totalRoundsCount - totalPlayed);
     return { wins: w, draws: d, losses: loss, pending };
-  }, [career.seasonLog, standings?.length]);
+  }, [career.seasonLog, totalRoundsCount]);
 
   const calendarMonths = useMemo(() => {
     const allTeams = (career.div === 2 ? comp?.teams2 : comp?.teams) || [];
@@ -452,47 +455,28 @@ export const CareerView = ({
       });
     }
 
-    const monthSpecs = [
-      { name: 'AGOSTO', weeks: [1, 2, 3, 4] },
-      { name: 'SEPTIEMBRE', weeks: [5, 6, 7, 8] },
-      { name: 'OCTUBRE', weeks: [9, 10, 11, 12] },
-      { name: 'NOVIEMBRE', weeks: [13, 14, 15, 16] },
-      { name: 'DICIEMBRE', weeks: [17, 18, 19, 20] },
-      { name: 'ENERO', weeks: [21, 22, 23, 24] },
-      { name: 'FEBRERO', weeks: [25, 26, 27, 28] },
-      { name: 'MARZO', weeks: [29, 30, 31, 32] },
-      { name: 'ABRIL', weeks: [33, 34, 35, 36] },
-      { name: 'MAYO', weeks: [37, 38, 39, 40, 41, 42, 43] }
+    const leagueOfficeWeeks = getSpecialOfficeWeeks(totalRoundsCount);
+    const totalSeasonWeeks = totalRoundsCount + leagueOfficeWeeks.length;
+
+    const monthNames = [
+      'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE',
+      'ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO'
     ];
 
+    const allWeeksList: any[] = [];
     let matchdayCounter = 0;
-    return monthSpecs.map(mSpec => {
-      const weekItems = mSpec.weeks.map(weekNum => {
-        if (weekNum === 1) {
-          return {
-            weekNum,
-            type: 'market',
-            title: 'APERTURA DE MERCADO',
-            isSpecial: true
-          };
-        }
-        if (weekNum === 8 || weekNum === 16 || weekNum === 32) {
-          return {
-            weekNum,
-            type: 'international',
-            title: 'PARÓN INTERNACIONAL',
-            isSpecial: true
-          };
-        }
-        if (weekNum === 23) {
-          return {
-            weekNum,
-            type: 'market',
-            title: 'APERTURA DE MERCADO',
-            isSpecial: true
-          };
-        }
 
+    for (let w = 1; w <= totalSeasonWeeks; w++) {
+      const office = leagueOfficeWeeks.find(o => o.week === w);
+      if (office) {
+        allWeeksList.push({
+          weekNum: w,
+          type: office.isMarket ? 'market' : 'international',
+          title: office.title.toUpperCase(),
+          isSpecial: true,
+          desc: office.desc
+        });
+      } else {
         matchdayCounter++;
         const currentMd = matchdayCounter;
         const fixture = teamFixtures.find(f => f.matchday === currentMd) || {
@@ -502,21 +486,32 @@ export const CareerView = ({
           played: false,
           result: null
         };
-
-        return {
-          weekNum,
+        allWeeksList.push({
+          weekNum: w,
           type: 'match',
           isSpecial: false,
           ...fixture
-        };
-      });
+        });
+      }
+    }
 
-      return {
-        monthName: mSpec.name,
-        items: weekItems
-      };
-    });
-  }, [schedule, comp, career.div, career.teamId, career.seasonLog]);
+    const monthsResult: any[] = [];
+    let currentWeekIdx = 0;
+    for (let m = 0; m < monthNames.length; m++) {
+      const isLast = m === monthNames.length - 1;
+      const weeksForThisMonth = isLast ? Math.max(1, allWeeksList.length - currentWeekIdx) : 4;
+      const monthWeeks = allWeeksList.slice(currentWeekIdx, currentWeekIdx + weeksForThisMonth);
+      currentWeekIdx += weeksForThisMonth;
+      if (monthWeeks.length > 0) {
+        monthsResult.push({
+          monthName: monthNames[m],
+          items: monthWeeks
+        });
+      }
+    }
+
+    return monthsResult;
+  }, [schedule, comp, career.div, career.teamId, career.seasonLog, totalRoundsCount]);
 
   const handleApplyToJob = (v: any) => {
     if (onSubmitApplication) {
@@ -863,7 +858,11 @@ export const CareerView = ({
                         className='w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:to-indigo-500 text-white py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest active:scale-95 transition-all shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 border border-blue-400/40'
                       >
                         <Trophy size={16} className='text-yellow-300 animate-pulse' />
-                        {championsFinished ? 'Ver Cuadro de Champions League' : 'Jugar Champions League'}
+                        {championsFinished
+                          ? 'Ver Cuadro de Champions League'
+                          : !allLeaguesFinished
+                            ? 'Simular Resto de Ligas y Jugar Champions League'
+                            : 'Jugar Champions League'}
                       </button>
                     )}
 
@@ -901,7 +900,7 @@ export const CareerView = ({
                   <div className='flex items-center justify-between'>
                     <div>
                       <span className='text-[9px] font-black uppercase px-2.5 py-1 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 inline-block'>
-                        Semana {currentWeekInfo.week} de 43 · Semana de Oficina
+                        Semana {currentWeekInfo.week} de {currentWeekInfo.totalWeeks || (totalRoundsCount + 5)} · Semana de Oficina
                       </span>
                       <h3 className='text-base font-black uppercase italic text-white mt-1.5'>
                         {currentWeekInfo.officeInfo.title}
@@ -975,7 +974,7 @@ export const CareerView = ({
                     }}
                     className='w-full bg-gradient-to-r from-indigo-500 via-purple-600 to-blue-600 hover:from-indigo-400 hover:to-blue-500 text-white py-4 rounded-2xl text-[10px] font-black uppercase italic tracking-widest active:scale-95 transition-all shadow-xl flex items-center justify-center gap-2'
                   >
-                    <Play size={15} /> Completar y Avanzar Semana {currentWeekInfo.week}
+                    <FastForward size={15} /> Completar y Avanzar Semana {currentWeekInfo.week}
                   </button>
                 </Panel>
 
@@ -983,10 +982,10 @@ export const CareerView = ({
                 <Panel className='p-5'>
                   <div className='flex items-center justify-between mb-2'>
                     <p className='text-[9px] font-black uppercase tracking-widest text-emerald-400'>
-                      Próximo partido · Jornada {(career.div === 2 ? (comp?.matchday2 || 0) : (comp?.matchday || 0)) + 1}
+                      Próximo partido · Jornada {(career.div === 2 ? (comp?.matchday2 || 0) : (comp?.matchday || 0)) + 1} de {totalRoundsCount}
                     </p>
                     <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-white/10'>
-                      Semana {currentWeekInfo.week} de 43
+                      Semana {currentWeekInfo.week} de {currentWeekInfo.totalWeeks || (totalRoundsCount + 5)}
                     </span>
                   </div>
                   <div className='flex items-center justify-between mt-4'>
@@ -1069,15 +1068,15 @@ export const CareerView = ({
                   <div className='grid grid-cols-2 gap-2 mt-4'>
                     <button
                       onClick={onPlayMatch}
-                      className='bg-gradient-to-r from-emerald-500 to-green-600 text-slate-950 py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-1.5'
+                      className='bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-1.5'
                     >
-                      <Swords size={14} /> Jugar con dados
+                      <Swords size={15} /> Jugar Partido
                     </button>
                     <button
                       onClick={onSimulateMatch}
-                      className='bg-slate-800 text-white py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest active:scale-95 transition-all flex items-center justify-center gap-1.5 border border-white/10'
+                      className='bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 border border-blue-400/30'
                     >
-                      <Play size={14} /> Simular
+                      <FastForward size={15} /> Simular Jornada
                     </button>
                   </div>
                 </Panel>
@@ -1872,132 +1871,164 @@ export const CareerView = ({
                   </div>
                 </div>
 
-                {currentWeekInfo.isMarketOpen ? (
-                  <div className='bg-emerald-950/30 border border-emerald-500/30 rounded-2xl p-3.5 flex items-center gap-3'>
-                    <div className='w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0'>
-                      <Sparkles size={16} />
-                    </div>
-                    <p className='text-[9px] font-bold text-emerald-100 leading-snug'>
-                      <strong className='text-white uppercase'>Ventana de Mercado Activa:</strong> Puedes enviar tu candidatura formal a <strong className='text-white'>1 vacante</strong>. La junta directiva realizará una evaluación a ciegas de <strong className='text-white'>2 semanas</strong>.
-                    </p>
-                  </div>
-                ) : (
-                  <div className='bg-slate-900/80 border border-amber-500/30 rounded-2xl p-3.5 flex items-center gap-3'>
-                    <div className='w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0'>
-                      <Lock size={16} />
-                    </div>
-                    <div>
-                      <p className='text-[9px] font-black uppercase text-amber-300'>Mercado Laboral Cerrado</p>
-                      <p className='text-[9px] font-bold text-slate-300 mt-0.5 leading-snug'>
-                        Las postulaciones solo se admiten en la <strong>Semana 1 (Apertura de Verano)</strong> y en la <strong>Semana 23 (Apertura de Invierno tras J19)</strong>. Puedes consultar los clubes y su estado actual.
-                      </p>
-                    </div>
-                  </div>
-                )}
+                {(() => {
+                  const alreadyTransferredOrSigned = career.transferredInSeason === (seasonState?.season || 1) || career.signedForSeason === (seasonState?.season || 1);
 
-                {marketVacancies?.length ? (
-                  <div className='space-y-3.5'>
-                    {marketVacancies.map(v => {
-                      const isThisApplied = career.activeApplication && career.activeApplication.teamId === v.teamId;
-                      const isLocked = career.activeApplication && !isThisApplied;
-                      const isMarketClosed = !currentWeekInfo.isMarketOpen;
-
-                      return (
-                        <div
-                          key={v.id}
-                          className={`bg-gradient-to-br from-black/50 to-slate-900/70 rounded-2xl p-4 border transition-all space-y-3 ${
-                            isThisApplied ? 'border-sky-500/50 bg-sky-950/20' : 'border-white/10 hover:border-white/20'
-                          }`}
-                        >
-                          <div className='flex items-center justify-between gap-3'>
-                            <div className='flex items-center gap-3 min-w-0'>
-                              <Shield color1={v.color1} color2={v.color2} initial={v.teamName} size='md' isFlag={v.isFlag} />
-                              <div className='min-w-0'>
-                                <h4 className='text-xs font-black uppercase italic text-white truncate'>{v.teamName}</h4>
-                                <p className='text-[9px] font-bold uppercase text-slate-400'>
-                                  {v.compName} · {v.div === 2 ? '2ª Div' : '1ª Div'} · Tier {v.tier} ({TIERS[v.tier]?.name})
-                                </p>
-                              </div>
-                            </div>
-                            <div className='text-right shrink-0'>
-                              <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-800 text-sky-300 border border-white/10'>
-                                {v.standingStatus}
-                              </span>
-                              <p className='text-[8px] font-bold text-amber-300/90 mt-1 uppercase'>
-                                {v.profile}
-                              </p>
-                            </div>
+                  return (
+                    <>
+                      {alreadyTransferredOrSigned ? (
+                        <div className='bg-emerald-950/30 border border-emerald-500/30 rounded-2xl p-3.5 flex items-center gap-3'>
+                          <div className='w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0'>
+                            <Check size={16} />
                           </div>
-
-                          {/* Contexto y crisis del club */}
-                          <div className='bg-black/40 rounded-xl p-3 border border-white/5 space-y-1.5'>
-                            <p className='text-[9px] font-bold italic text-slate-200 leading-snug'>
-                              "{v.directiveQuote}"
+                          <div>
+                            <p className='text-[9px] font-black uppercase text-emerald-300'>Contrato Recién Firmado</p>
+                            <p className='text-[9px] font-bold text-slate-200 mt-0.5 leading-snug'>
+                              Has firmado contrato con <strong className='text-white uppercase'>{team?.name}</strong>. Ya no tienes opciones de postulación disponibles durante esta temporada.
                             </p>
-                            <p className='text-[8px] font-bold text-slate-400'>
-                              {v.crisisText}
-                            </p>
-                            <div className='flex items-center justify-between pt-1 border-t border-white/5 text-[8px] font-bold'>
-                              <span className='text-slate-400 uppercase'>Objetivo Principal:</span>
-                              <span className='text-amber-300'>{v.requiredObjective}</span>
-                            </div>
-
-                            {/* Objetivos de contrato completos */}
-                            {v.contractObjectives?.length > 0 && (
-                              <div className='mt-2 space-y-1 bg-black/50 rounded-xl p-2 border border-white/5'>
-                                <p className='text-[7px] font-black uppercase text-sky-400 tracking-wider flex items-center gap-1'>
-                                  <Target size={10} /> Objetivos Exigidos al Ser Contratado:
-                                </p>
-                                <div className='grid grid-cols-1 sm:grid-cols-2 gap-1'>
-                                  {v.contractObjectives.map((obj, oi) => (
-                                    <div key={oi} className='text-[8px] font-bold text-slate-300 flex items-center justify-between bg-slate-900/60 px-2 py-1 rounded'>
-                                      <span className='truncate mr-1 text-slate-200'>{obj.label}</span>
-                                      <span className='text-amber-400 font-black shrink-0'>{obj.targetValue}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
                           </div>
-
-                          {/* Botón de postulación / estado según reglas de mercado */}
-                          {isThisApplied ? (
-                            <div className='w-full bg-sky-950/60 text-sky-300 py-3 rounded-xl text-[9px] font-black uppercase italic tracking-widest flex items-center justify-center gap-2 border border-sky-500/40'>
-                              <span className='w-2 h-2 rounded-full bg-sky-400 animate-ping' />
-                              Candidatura en Revisión ({career.activeApplication.weeksRemaining} sem)
-                            </div>
-                          ) : isMarketClosed ? (
-                            <button
-                              disabled
-                              className='w-full bg-slate-900/60 text-slate-500 py-3 rounded-xl text-[9px] font-black uppercase italic tracking-widest flex items-center justify-center gap-1.5 border border-white/5 cursor-not-allowed opacity-40'
-                            >
-                              <Lock size={12} /> Mercado Cerrado (Apertura: Sem. 1 y Sem. 23)
-                            </button>
-                          ) : isLocked ? (
-                            <button
-                              disabled
-                              className='w-full bg-slate-900/60 text-slate-500 py-3 rounded-xl text-[9px] font-black uppercase italic tracking-widest flex items-center justify-center gap-1.5 border border-white/5 cursor-not-allowed opacity-40'
-                            >
-                              <Lock size={12} /> Postulación Bloqueada (1 Activa en Curso)
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleApplyToJob(v)}
-                              className='w-full bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white py-3 rounded-xl text-[9px] font-black uppercase italic tracking-widest active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-sky-600/20'
-                            >
-                              <Briefcase size={13} /> Postularse al Club (Evaluación 2 Semanas)
-                            </button>
-                          )}
                         </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className='text-center py-8 bg-black/20 rounded-2xl border border-white/5'>
-                    <Briefcase size={28} className='text-slate-600 mx-auto mb-2' />
-                    <p className='text-[10px] font-bold text-slate-300'>No hay vacantes abiertas afines a tu jerarquía en este momento.</p>
-                  </div>
-                )}
+                      ) : currentWeekInfo.isMarketOpen ? (
+                        <div className='bg-emerald-950/30 border border-emerald-500/30 rounded-2xl p-3.5 flex items-center gap-3'>
+                          <div className='w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0'>
+                            <Sparkles size={16} />
+                          </div>
+                          <p className='text-[9px] font-bold text-emerald-100 leading-snug'>
+                            <strong className='text-white uppercase'>Ventana de Mercado Activa:</strong> Puedes enviar tu candidatura formal a <strong className='text-white'>1 vacante</strong>. La junta directiva realizará una evaluación a ciegas de <strong className='text-white'>2 semanas</strong>.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className='bg-slate-900/80 border border-amber-500/30 rounded-2xl p-3.5 flex items-center gap-3'>
+                          <div className='w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0'>
+                            <Lock size={16} />
+                          </div>
+                          <div>
+                            <p className='text-[9px] font-black uppercase text-amber-300'>Mercado Laboral Cerrado</p>
+                            <p className='text-[9px] font-bold text-slate-300 mt-0.5 leading-snug'>
+                              Las postulaciones oficiales se admiten en la <strong>Semana 1 (Apertura de Verano)</strong> y en la <strong>Apertura de Invierno (Ecuador del campeonato)</strong>. Puedes explorar los clubes y su estado actual en todo momento.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {marketVacancies?.length ? (
+                        <div className='space-y-3.5'>
+                          {marketVacancies.map(v => {
+                            const isMyCurrentTeam = v.teamId === career.teamId && v.compId === career.compId && v.div === career.div;
+                            const isThisApplied = career.activeApplication && career.activeApplication.teamId === v.teamId;
+                            const isLocked = !!career.activeApplication && !isThisApplied;
+                            const isMarketClosed = !currentWeekInfo.isMarketOpen;
+
+                            return (
+                              <div
+                                key={v.id}
+                                className={`bg-gradient-to-br from-black/50 to-slate-900/70 rounded-2xl p-4 border transition-all space-y-3 ${
+                                  isThisApplied ? 'border-sky-500/50 bg-sky-950/20' : isMyCurrentTeam ? 'border-emerald-500/40 bg-emerald-950/20' : 'border-white/10 hover:border-white/20'
+                                }`}
+                              >
+                                <div className='flex items-center justify-between gap-3'>
+                                  <div className='flex items-center gap-3 min-w-0'>
+                                    <Shield color1={v.color1} color2={v.color2} initial={v.teamName} size='md' isFlag={v.isFlag} />
+                                    <div className='min-w-0'>
+                                      <h4 className='text-xs font-black uppercase italic text-white truncate'>{v.teamName}</h4>
+                                      <p className='text-[9px] font-bold uppercase text-slate-400'>
+                                        {v.compName} · {v.div === 2 ? '2ª Div' : '1ª Div'} · Tier {v.tier} ({TIERS[v.tier]?.name})
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className='text-right shrink-0'>
+                                    <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-800 text-sky-300 border border-white/10'>
+                                      {v.standingStatus}
+                                    </span>
+                                    <p className='text-[8px] font-bold text-amber-300/90 mt-1 uppercase'>
+                                      {v.profile}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                {/* Contexto y crisis del club */}
+                                <div className='bg-black/40 rounded-xl p-3 border border-white/5 space-y-1.5'>
+                                  <p className='text-[9px] font-bold italic text-slate-200 leading-snug'>
+                                    "{v.directiveQuote}"
+                                  </p>
+                                  <p className='text-[8px] font-bold text-slate-400'>
+                                    {v.crisisText}
+                                  </p>
+                                  <div className='flex items-center justify-between pt-1 border-t border-white/5 text-[8px] font-bold'>
+                                    <span className='text-slate-400 uppercase'>Objetivo Principal:</span>
+                                    <span className='text-amber-300'>{v.requiredObjective}</span>
+                                  </div>
+
+                                  {/* Objetivos de contrato completos */}
+                                  {v.contractObjectives?.length > 0 && (
+                                    <div className='mt-2 space-y-1 bg-black/50 rounded-xl p-2 border border-white/5'>
+                                      <p className='text-[7px] font-black uppercase text-sky-400 tracking-wider flex items-center gap-1'>
+                                        <Target size={10} /> Objetivos Exigidos al Ser Contratado:
+                                      </p>
+                                      <div className='grid grid-cols-1 sm:grid-cols-2 gap-1'>
+                                        {v.contractObjectives.map((obj, oi) => (
+                                          <div key={oi} className='text-[8px] font-bold text-slate-300 flex items-center justify-between bg-slate-900/60 px-2 py-1 rounded'>
+                                            <span className='truncate mr-1 text-slate-200'>{obj.label}</span>
+                                            <span className='text-amber-400 font-black shrink-0'>{obj.targetValue}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Botón de postulación / estado según reglas de mercado */}
+                                {isMyCurrentTeam ? (
+                                  <div className='w-full bg-emerald-950/60 text-emerald-300 py-3 rounded-xl text-[9px] font-black uppercase italic tracking-widest flex items-center justify-center gap-2 border border-emerald-500/40'>
+                                    <Check size={12} /> Tu Club Actual
+                                  </div>
+                                ) : alreadyTransferredOrSigned ? (
+                                  <button
+                                    disabled
+                                    className='w-full bg-slate-900/60 text-slate-500 py-3 rounded-xl text-[9px] font-black uppercase italic tracking-widest flex items-center justify-center gap-1.5 border border-white/5 cursor-not-allowed opacity-40'
+                                  >
+                                    <Lock size={12} /> Contrato Firmado (Sin Postulaciones Disponibles)
+                                  </button>
+                                ) : isThisApplied ? (
+                                  <div className='w-full bg-sky-950/60 text-sky-300 py-3 rounded-xl text-[9px] font-black uppercase italic tracking-widest flex items-center justify-center gap-2 border border-sky-500/40'>
+                                    <span className='w-2 h-2 rounded-full bg-sky-400 animate-ping' />
+                                    Candidatura en Revisión ({career.activeApplication.weeksRemaining} sem)
+                                  </div>
+                                ) : isLocked ? (
+                                  <button
+                                    disabled
+                                    className='w-full bg-slate-900/60 text-slate-500 py-3 rounded-xl text-[9px] font-black uppercase italic tracking-widest flex items-center justify-center gap-1.5 border border-white/5 cursor-not-allowed opacity-40'
+                                  >
+                                    <Lock size={12} /> Postulación Bloqueada (1 Activa en Curso)
+                                  </button>
+                                ) : isMarketClosed ? (
+                                  <button
+                                    disabled
+                                    className='w-full bg-slate-900/60 text-slate-500 py-3 rounded-xl text-[9px] font-black uppercase italic tracking-widest flex items-center justify-center gap-1.5 border border-white/5 cursor-not-allowed opacity-40'
+                                  >
+                                    <Lock size={12} /> Mercado Cerrado (Apertura en Semanas de Verano e Invierno)
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => handleApplyToJob(v)}
+                                    className='w-full bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white py-3 rounded-xl text-[9px] font-black uppercase italic tracking-widest active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-sky-600/20'
+                                  >
+                                    <Briefcase size={13} /> Postularse al Club (Evaluación 2 Semanas)
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className='text-center py-8 bg-black/20 rounded-2xl border border-white/5'>
+                          <Briefcase size={28} className='text-slate-600 mx-auto mb-2' />
+                          <p className='text-[10px] font-bold text-slate-300'>No hay vacantes abiertas afines a tu jerarquía en este momento.</p>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </Panel>
             </div>
           )}
@@ -2031,12 +2062,27 @@ export const CareerView = ({
                               </p>
                             </div>
                           </div>
-                          <div className='text-right'>
+                          <div className='text-right space-y-1'>
                             <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-800 text-amber-300 border border-white/10'>
                               {o.profile}
                             </span>
+                            {o.weeksRemaining !== undefined && o.weeksRemaining !== null && (
+                              <div>
+                                {o.weeksRemaining > 1 ? (
+                                  <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 inline-flex items-center gap-1'>
+                                    <Clock size={10} className='text-amber-400' />
+                                    Expira en {o.weeksRemaining} sem.
+                                  </span>
+                                ) : (
+                                  <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/40 inline-flex items-center gap-1 animate-pulse'>
+                                    <AlertTriangle size={10} className='text-red-400' />
+                                    ¡Última semana!
+                                  </span>
+                                )}
+                              </div>
+                            )}
                             {o.position && (
-                              <p className='text-[8px] font-bold text-slate-400 mt-1'>
+                              <p className='text-[8px] font-bold text-slate-400 mt-0.5'>
                                 Posición: {o.position}º ({o.pts} pts)
                               </p>
                             )}
@@ -2257,6 +2303,87 @@ export const CareerView = ({
               onAcceptOffer && onAcceptOffer(o);
             }}
           />
+        )}
+      </AnimatePresence>
+
+      {/* MODAL DE ALERTA EMERGENTE DE RESOLUCIÓN DE CANDIDATURA */}
+      <ApplicationResolutionModal
+        isOpen={!!career.pendingAppResolutionModal}
+        resolution={career.pendingAppResolutionModal}
+        career={career}
+        onAccept={(offer) => {
+          if (onAcceptOffer) {
+            onAcceptOffer(offer);
+          }
+        }}
+        onReject={() => {
+          if (onRejectAppResolution) {
+            onRejectAppResolution();
+          } else if (onDismissAppResolutionModal) {
+            onDismissAppResolutionModal();
+          }
+        }}
+        onDecideLater={(offer) => {
+          if (onDecideLaterAppOffer) {
+            onDecideLaterAppOffer(offer);
+          } else if (onDismissAppResolutionModal) {
+            onDismissAppResolutionModal();
+          }
+          setToastMessage(`Propuesta de ${offer.teamName} guardada en tu buzón (vigencia: 2 semanas).`);
+        }}
+        onDismiss={() => {
+          if (onDismissAppResolutionModal) {
+            onDismissAppResolutionModal();
+          }
+        }}
+        ui={ui}
+      />
+
+      {/* MODAL DE CONFIRMACIÓN DE ENVÍO DE CANDIDATURA */}
+      <AnimatePresence>
+        {submissionModal && (
+          <div className='fixed inset-0 z-[80] bg-black/85 backdrop-blur-md flex items-center justify-center p-4'>
+            <motion.div
+              initial={{ scale: 0.9, y: 20, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className='w-full max-w-sm bg-gradient-to-b from-slate-900 via-slate-950 to-black rounded-[2.25rem] border border-sky-500/40 p-6 text-center shadow-2xl space-y-4'
+            >
+              <div className='w-14 h-14 rounded-2xl bg-sky-500/20 text-sky-400 border border-sky-500/30 flex items-center justify-center mx-auto shadow-lg'>
+                <Briefcase size={28} />
+              </div>
+              <div>
+                <span className='px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[8px] font-black uppercase tracking-wider'>
+                  Candidatura Registrada
+                </span>
+                <h3 className='text-base font-black uppercase italic text-white mt-2'>
+                  {submissionModal.teamName}
+                </h3>
+                <p className='text-[9px] font-bold text-slate-300 mt-0.5 uppercase'>
+                  {submissionModal.compName} · Tier {submissionModal.tier}
+                </p>
+              </div>
+
+              <div className='bg-black/40 rounded-2xl p-3.5 border border-white/5 space-y-2 text-left'>
+                <div className='flex items-center gap-2 text-sky-300 text-[9px] font-black uppercase'>
+                  <Clock size={13} /> Proceso de Evaluación: 2 Semanas
+                </div>
+                <p className='text-[9px] font-bold text-slate-300 leading-relaxed'>
+                  La junta directiva de <strong>{submissionModal.teamName}</strong> evaluará tu trayectoria y rendimiento durante las próximas <strong>2 semanas de juego</strong>.
+                </p>
+                <p className='text-[8.5px] font-bold text-slate-400 leading-snug'>
+                  Recibirás una alerta emergente formal en pantalla con la resolución de la directiva y opciones para aceptar, rechazar o decidir más tarde.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setSubmissionModal(null)}
+                className='w-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white py-3 rounded-2xl text-[10px] font-black uppercase italic tracking-widest active:scale-95 transition-all shadow-lg shadow-sky-500/25'
+              >
+                Entendido
+              </button>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
