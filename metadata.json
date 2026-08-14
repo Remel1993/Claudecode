@@ -1,8 +1,6 @@
 {
-  "name": "Remix Dice Football new",
+  "name": "SimulaciónHub - Dice Football",
   "description": "Dice-based football simulation game with league management, career mode, and team customization.",
   "requestFramePermissions": [],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
