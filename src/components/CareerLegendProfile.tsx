@@ -21,13 +21,32 @@ export const CareerLegendProfile: React.FC<CareerLegendProfileProps> = ({
   const { Shield } = ui || {};
 
   const managerName = career.manager || 'Entrenador';
-  const reputation = Math.max(0, Math.min(100, career.reputation ?? 10));
+  const reputation = Math.max(0, Math.min(100, Math.round(((career.reputation ?? 10)) * 10) / 10));
   const band = repBand(reputation);
 
-  // Siguiente rango de reputación
-  const currentBandIndex = REPUTATION_BANDS.findIndex(b => reputation >= b.min && reputation <= b.max);
-  const nextBand = currentBandIndex < REPUTATION_BANDS.length - 1 ? REPUTATION_BANDS[currentBandIndex + 1] : null;
-  const pointsToNext = nextBand ? Math.max(0, nextBand.min - reputation) : 0;
+  // Siguiente rango de reputación y cálculo exacto de puntos restantes
+  let nextBand: { label: string; min: number } | null = null;
+  let pointsToNext = 0;
+
+  if (reputation < 20) {
+    nextBand = { label: 'Prometedor', min: 20 };
+    pointsToNext = +(20 - reputation).toFixed(1);
+  } else if (reputation < 40) {
+    nextBand = { label: 'Consolidado', min: 40 };
+    pointsToNext = +(40 - reputation).toFixed(1);
+  } else if (reputation < 60) {
+    nextBand = { label: 'Reconocido', min: 60 };
+    pointsToNext = +(60 - reputation).toFixed(1);
+  } else if (reputation < 70) {
+    nextBand = { label: 'Élite mundial', min: 70 };
+    pointsToNext = +(70 - reputation).toFixed(1);
+  } else if (reputation < 100) {
+    nextBand = { label: 'Leyenda Máxima (100)', min: 100 };
+    pointsToNext = +(100 - reputation).toFixed(1);
+  } else {
+    nextBand = null;
+    pointsToNext = 0;
+  }
 
   // Estadísticas acumuladas
   const stats = career.stats || { matches: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0 };

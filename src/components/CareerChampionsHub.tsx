@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { Trophy, Dices, Zap, Shield as ShieldIcon, ChevronRight, Calendar, Award, CheckCircle2, XCircle, Clock, Sparkles, Layers, ArrowLeft, RotateCcw } from 'lucide-react';
+import { Trophy, Dices, Zap, Shield as ShieldIcon, ChevronRight, Calendar, Award, CheckCircle2, XCircle, Clock, Sparkles, Layers, ArrowLeft, RotateCcw, ShieldCheck, Dumbbell, Target } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { clPhaseLabel, getChampionsObjectiveTarget, CL_PHASE_ORDER } from '../lib/career';
+import { clPhaseLabel, getChampionsObjectiveTarget, CL_PHASE_ORDER, tacticalOptions, sameDist } from '../lib/career';
 
 interface CareerChampionsHubProps {
   career: any;
@@ -13,6 +13,9 @@ interface CareerChampionsHubProps {
   onSimulateAllChampions?: () => void;
   onOpenNewSeason?: () => void;
   onBackToCareer?: () => void;
+  onOpenDrill?: () => void;
+  onOpenTraining?: () => void;
+  onSetTactic?: (tactic: any) => void;
   ui: any;
 }
 
@@ -26,10 +29,13 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
   onSimulateAllChampions,
   onOpenNewSeason,
   onBackToCareer,
+  onOpenDrill,
+  onOpenTraining,
+  onSetTactic,
   ui
 }) => {
   const { Shield } = ui;
-  const [subTab, setSubTab] = useState<'match' | 'groups' | 'bracket' | 'schedule' | 'objective'>('match');
+  const [subTab, setSubTab] = useState<'match' | 'tactic' | 'groups' | 'bracket' | 'schedule' | 'objective'>('match');
   const [selectedGroupIdx, setSelectedGroupIdx] = useState<number | null>(null);
 
   // Identificar el equipo del modo carrera dentro de la Champions (C1)
@@ -42,6 +48,17 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
   const phase = clComp?.phase || 'groups';
   const matchday = clComp?.matchday || 0;
   const isFinished = clComp?.showWinner || phase === 'Terminado';
+
+  // Base táctica y opciones
+  const baseTactic = useMemo(() => ({
+    att: career.baseDist?.att || team?.att || 3,
+    opp: career.baseDist?.opp || team?.opp || 3,
+    def: career.baseDist?.def || team?.def || 3
+  }), [career.baseDist, team]);
+
+  const totalTeamStrength = baseTactic.att + baseTactic.opp + baseTactic.def;
+  const currentTier = career?.tier || team?.tier || 1;
+  const tacticOptionsList = useMemo(() => tacticalOptions(baseTactic, currentTier), [baseTactic, currentTier]);
 
   // Buscar el grupo del usuario
   const userGroup = useMemo(() => {
@@ -56,6 +73,114 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
     const idx = clComp.groups.findIndex((g: any) => g.name === userGroup.name);
     return idx >= 0 ? idx : 0;
   }, [selectedGroupIdx, userGroup, clComp]);
+
+  // Encontrar el último partido jugado por el usuario en Champions League (cronológicamente el más reciente)
+  const lastPlayedChampionsMatch = useMemo(() => {
+    // 1. Buscar en el historial general de Champions (C1) - index 0 es la jornada más reciente
+    let historyMatch: any = null;
+    if (Array.isArray(clComp?.history) && clComp.history.length > 0) {
+      for (let i = 0; i < clComp.history.length; i++) {
+        const h = clComp.history[i];
+        const m = (h.results || []).find((r: any) => r.hId === careerClTeam?.id || r.aId === careerClTeam?.id);
+        if (m) {
+          const ht = clComp.teams.find((t: any) => t.id === m.hId);
+          const at = clComp.teams.find((t: any) => t.id === m.aId);
+          const isHome = m.hId === careerClTeam?.id;
+          const myScore = isHome ? m.sh : m.sa;
+          const rivalScore = isHome ? m.sa : m.sh;
+          const rivalTeam = isHome ? at : ht;
+          const res = myScore > rivalScore ? 'W' : myScore === rivalScore ? 'D' : 'L';
+
+          // Detectar si fue partido de eliminatoria de ida y vuelta
+          let aggregateInfo: any = null;
+          const isKnockout = ['Octavos', 'Cuartos', 'Semis'].some(p => (h.day || '').includes(p));
+          const phaseKey = ['Octavos', 'Cuartos', 'Semis'].find(p => (h.day || '').includes(p));
+          
+          if (isKnockout && phaseKey && clComp?.bracket?.[phaseKey]) {
+            const bMatches = Array.isArray(clComp.bracket[phaseKey]) ? clComp.bracket[phaseKey] : [clComp.bracket[phaseKey]];
+            const bMatch = bMatches.find((bm: any) => bm && (bm.hId === careerClTeam?.id || bm.aId === careerClTeam?.id));
+            if (bMatch && bMatch.sh !== null) {
+              const teamIsHId = bMatch.hId === careerClTeam?.id;
+              const hasVuelta = bMatch.sh2 !== null && bMatch.sh2 !== undefined;
+              const totH = (bMatch.sh || 0) + (bMatch.sh2 || 0);
+              const totA = (bMatch.sa || 0) + (bMatch.sa2 || 0);
+              const myTot = teamIsHId ? totH : totA;
+              const rivalTot = teamIsHId ? totA : totH;
+              
+              let qualified = null;
+              if (hasVuelta) {
+                if (totH > totA) qualified = teamIsHId;
+                else if (totA > totH) qualified = !teamIsHId;
+                else if (bMatch.penH !== null && bMatch.penH !== undefined) {
+                  qualified = bMatch.penH > bMatch.penA ? teamIsHId : !teamIsHId;
+                }
+              }
+
+              aggregateInfo = {
+                phaseName: phaseKey,
+                isVuelta: (h.day || '').includes('Vuelta') || hasVuelta,
+                leg1Score: `${bMatch.sh} - ${bMatch.sa}`,
+                leg2Score: hasVuelta ? `${bMatch.sh2} - ${bMatch.sa2}` : null,
+                myLeg1: teamIsHId ? bMatch.sh : bMatch.sa,
+                rivalLeg1: teamIsHId ? bMatch.sa : bMatch.sh,
+                myLeg2: hasVuelta ? (teamIsHId ? bMatch.sh2 : bMatch.sa2) : null,
+                rivalLeg2: hasVuelta ? (teamIsHId ? bMatch.sa2 : bMatch.sh2) : null,
+                myTotal: myTot,
+                rivalTotal: rivalTot,
+                globalScoreText: hasVuelta ? `${myTot} - ${rivalTot}` : null,
+                penaltiesText: (bMatch.penH !== null && bMatch.penH !== undefined) ? `(${bMatch.penH}-${bMatch.penA} pen.)` : null,
+                qualified
+              };
+            }
+          }
+
+          const clLogEntry = (career.seasonLog || []).find((l: any) => l.isChampions);
+
+          historyMatch = {
+            dayLabel: h.day,
+            home: ht,
+            away: at,
+            isHome,
+            scoreH: m.sh,
+            scoreA: m.sa,
+            penH: m.penH,
+            penA: m.penA,
+            myScore,
+            rivalScore,
+            rivalTeam,
+            result: res,
+            aggregateInfo,
+            pe: clLogEntry?.pe ?? (res === 'W' ? 3 : res === 'D' ? 2 : 0),
+            rep: clLogEntry?.rep ?? (res === 'W' ? 0.8 : res === 'D' ? 0.3 : -0.1)
+          };
+          break;
+        }
+      }
+    }
+
+    if (historyMatch) return historyMatch;
+
+    const clLogEntry = (career.seasonLog || []).find((l: any) => l.isChampions);
+    if (clLogEntry) {
+      return {
+        dayLabel: `Champions · ${clPhaseLabel(clLogEntry.phase || 'groups')}`,
+        home: null,
+        away: null,
+        isHome: true,
+        scoreH: clLogEntry.gf,
+        scoreA: clLogEntry.ga,
+        myScore: clLogEntry.gf,
+        rivalScore: clLogEntry.ga,
+        rivalTeam: { name: clLogEntry.rival || 'Rival Europeo' },
+        result: clLogEntry.result,
+        aggregateInfo: null,
+        pe: clLogEntry.pe,
+        rep: clLogEntry.rep
+      };
+    }
+
+    return null;
+  }, [career.seasonLog, clComp, careerClTeam]);
 
   // Calcular el partido actual del usuario en Champions
   const currentMatchData = useMemo(() => {
@@ -306,7 +431,7 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
       </div>
 
       {/* NAVEGACIÓN DE SUB-PESTAÑAS */}
-      <div className='grid grid-cols-5 gap-1 bg-slate-900/60 p-1 rounded-2xl border border-white/5 text-[9px] font-black uppercase tracking-wider'>
+      <div className='grid grid-cols-3 sm:grid-cols-6 gap-1 bg-slate-900/60 p-1 rounded-2xl border border-white/5 text-[9px] font-black uppercase tracking-wider'>
         <button
           onClick={() => setSubTab('match')}
           className={`py-2 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1 ${
@@ -317,6 +442,17 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
         >
           <Dices size={12} />
           <span>Partido</span>
+        </button>
+        <button
+          onClick={() => setSubTab('tactic')}
+          className={`py-2 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1 ${
+            subTab === 'tactic'
+              ? 'bg-blue-600 text-white shadow-md'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <ShieldCheck size={12} />
+          <span>Táctica</span>
         </button>
         <button
           onClick={() => setSubTab('groups')}
@@ -375,6 +511,106 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
             exit={{ opacity: 0, y: -10 }}
             className='space-y-4'
           >
+            {/* SECCIÓN 1: ÚLTIMO PARTIDO JUGADO EN CHAMPIONS (CON RESULTADO) */}
+            {lastPlayedChampionsMatch && (
+              <div className='bg-gradient-to-br from-slate-900/90 via-slate-900/70 to-blue-950/40 rounded-3xl p-4 border border-blue-500/30 shadow-lg space-y-2.5'>
+                <div className='flex items-center justify-between'>
+                  <div className='flex items-center gap-1.5'>
+                    <span className='text-[8px] font-black uppercase tracking-widest text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20'>
+                      Último Partido Disputado
+                    </span>
+                    <span className='text-[8px] font-bold text-slate-400'>
+                      {lastPlayedChampionsMatch.dayLabel}
+                    </span>
+                  </div>
+                  <span className={`text-[8px] font-black uppercase px-2.5 py-0.5 rounded-full ${
+                    lastPlayedChampionsMatch.result === 'W'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : lastPlayedChampionsMatch.result === 'D'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      : 'bg-red-500/20 text-red-300 border border-red-500/40'
+                  }`}>
+                    {lastPlayedChampionsMatch.result === 'W' ? 'Victoria 🏆' : lastPlayedChampionsMatch.result === 'D' ? 'Empate 🤝' : 'Derrota ❌'}
+                  </span>
+                </div>
+
+                <div className='bg-black/40 rounded-2xl p-3 border border-white/5 flex items-center justify-between gap-2'>
+                  <div className='flex items-center gap-2 min-w-0 flex-1'>
+                    <Shield
+                      color1={lastPlayedChampionsMatch.home?.color1 || team?.color1}
+                      color2={lastPlayedChampionsMatch.home?.color2 || team?.color2}
+                      initial={lastPlayedChampionsMatch.home?.name || team?.name}
+                      size='sm'
+                      isFlag={lastPlayedChampionsMatch.home?.isFlag}
+                    />
+                    <span className={`text-[10px] font-black uppercase truncate ${lastPlayedChampionsMatch.home?.id === careerClTeam?.id || lastPlayedChampionsMatch.isHome ? 'text-blue-300' : 'text-white'}`}>
+                      {lastPlayedChampionsMatch.home?.name || (lastPlayedChampionsMatch.isHome ? team?.name : lastPlayedChampionsMatch.rivalTeam?.name)}
+                    </span>
+                  </div>
+
+                  <div className='text-center shrink-0 px-3 py-1 bg-black/60 rounded-xl border border-white/10'>
+                    <span className='text-sm font-black italic text-white tabular-nums tracking-wider'>
+                      {lastPlayedChampionsMatch.scoreH} - {lastPlayedChampionsMatch.scoreA}
+                    </span>
+                    {lastPlayedChampionsMatch.penH !== null && lastPlayedChampionsMatch.penH !== undefined && (
+                      <span className='block text-[7.5px] font-bold text-amber-300'>
+                        ({lastPlayedChampionsMatch.penH}-{lastPlayedChampionsMatch.penA} pen.)
+                      </span>
+                    )}
+                  </div>
+
+                  <div className='flex items-center justify-end gap-2 min-w-0 flex-1 text-right'>
+                    <span className={`text-[10px] font-black uppercase truncate ${lastPlayedChampionsMatch.away?.id === careerClTeam?.id || !lastPlayedChampionsMatch.isHome ? 'text-blue-300' : 'text-white'}`}>
+                      {lastPlayedChampionsMatch.away?.name || (!lastPlayedChampionsMatch.isHome ? team?.name : lastPlayedChampionsMatch.rivalTeam?.name)}
+                    </span>
+                    <Shield
+                      color1={lastPlayedChampionsMatch.away?.color1 || lastPlayedChampionsMatch.rivalTeam?.color1}
+                      color2={lastPlayedChampionsMatch.away?.color2 || lastPlayedChampionsMatch.rivalTeam?.color2}
+                      initial={lastPlayedChampionsMatch.away?.name || lastPlayedChampionsMatch.rivalTeam?.name}
+                      size='sm'
+                      isFlag={lastPlayedChampionsMatch.away?.isFlag}
+                    />
+                  </div>
+                </div>
+
+                {/* Resumen Global de Eliminatoria (Ida y Vuelta) */}
+                {lastPlayedChampionsMatch.aggregateInfo && (
+                  <div className='bg-blue-950/60 rounded-2xl p-2.5 border border-blue-400/30 flex flex-wrap items-center justify-between gap-2 text-[8px] font-bold text-slate-200'>
+                    <div className='flex items-center gap-2'>
+                      <span className='text-amber-400 font-black uppercase tracking-wider'>Marcador Global:</span>
+                      <span className='bg-black/60 px-2 py-0.5 rounded-lg font-black text-white text-[9px] border border-white/10'>
+                        Ida: {lastPlayedChampionsMatch.aggregateInfo.leg1Score}
+                      </span>
+                      {lastPlayedChampionsMatch.aggregateInfo.leg2Score && (
+                        <span className='bg-black/60 px-2 py-0.5 rounded-lg font-black text-white text-[9px] border border-white/10'>
+                          Vuelta: {lastPlayedChampionsMatch.aggregateInfo.leg2Score}
+                        </span>
+                      )}
+                      {lastPlayedChampionsMatch.aggregateInfo.globalScoreText && (
+                        <span className='bg-blue-600 px-2.5 py-0.5 rounded-lg font-black text-white text-[9px] shadow-sm'>
+                          GLOBAL: {lastPlayedChampionsMatch.aggregateInfo.globalScoreText} {lastPlayedChampionsMatch.aggregateInfo.penaltiesText || ''}
+                        </span>
+                      )}
+                    </div>
+                    {lastPlayedChampionsMatch.aggregateInfo.qualified !== null && (
+                      <span className={`px-2 py-0.5 rounded-full font-black uppercase tracking-wider ${
+                        lastPlayedChampionsMatch.aggregateInfo.qualified
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                      }`}>
+                        {lastPlayedChampionsMatch.aggregateInfo.qualified ? '✅ ¡Clasificado a siguiente ronda!' : '❌ Eliminado en esta ronda'}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                <div className='flex items-center justify-between text-[8px] font-bold text-slate-400 px-1'>
+                  <span>Balance Continental: +{lastPlayedChampionsMatch.pe || 0} PE ganados</span>
+                  <span className='text-amber-400 font-black'>+{lastPlayedChampionsMatch.rep || 0} Reputación</span>
+                </div>
+              </div>
+            )}
+
             {isChampion ? (
               <div className='bg-gradient-to-br from-amber-500/20 via-yellow-500/10 to-slate-900 border border-yellow-500/40 rounded-3xl p-6 text-center space-y-4 shadow-xl'>
                 <Trophy size={48} className='text-yellow-400 mx-auto animate-bounce drop-shadow-[0_0_20px_rgba(250,204,21,0.5)]' />
@@ -403,7 +639,7 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                   <div className='flex items-center gap-2'>
                     <span className='w-2 h-2 rounded-full bg-blue-400 animate-ping' />
                     <span className='text-[10px] font-black uppercase tracking-wider text-blue-300'>
-                      {currentMatchData.phaseLabel}
+                      Próximo Partido · {currentMatchData.phaseLabel}
                     </span>
                   </div>
                   {currentMatchData.aggregate && (
@@ -458,6 +694,60 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                   </div>
                 </div>
 
+                {/* Dinámicas de Salud / Inmunidad / Lesiones en Champions */}
+                <div className='space-y-2'>
+                  {career.activeInjury && (
+                    <div className='bg-red-950/50 border border-red-500/40 rounded-2xl p-3 flex items-start gap-2.5 shadow-md'>
+                      <span className='text-red-400 font-black text-sm'>⚠️</span>
+                      <div className='text-[9px] font-bold text-red-200 leading-snug'>
+                        <span className='text-white font-black uppercase block tracking-wider'>
+                          Baja temporal por lesión: -1 {career.activeInjury.label || career.activeInjury.attr?.toUpperCase()}
+                        </span>
+                        Afecta exclusivamente a este partido europeo. Alta médica automática tras el encuentro.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Previa de Entrenamiento Champions */}
+                  <div className='bg-gradient-to-r from-blue-900/30 via-indigo-900/30 to-purple-900/30 rounded-2xl p-3 border border-white/10 flex items-center justify-between gap-2'>
+                    <div className='min-w-0'>
+                      <div className='flex items-center gap-1.5 flex-wrap'>
+                        <p className='text-[9px] font-black uppercase tracking-widest text-blue-300'>
+                          Preparación Europea
+                        </p>
+                        {career.medicalImmunityWeeks > 0 && (
+                          <span className='text-[8px] font-black uppercase px-2 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'>
+                            Inmunidad: {career.medicalImmunityWeeks} sem.
+                          </span>
+                        )}
+                      </div>
+                      <p className='text-[9px] font-bold text-slate-300 mt-0.5'>
+                        {career.pe} PE disponibles en tu club
+                      </p>
+                    </div>
+                    {(onOpenDrill || onOpenTraining) && (
+                      <div className='flex items-center gap-1.5 shrink-0'>
+                        {onOpenDrill && (
+                          <button
+                            onClick={onOpenDrill}
+                            className='px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[8px] font-black uppercase italic active:scale-95'
+                          >
+                            1D6
+                          </button>
+                        )}
+                        {onOpenTraining && (
+                          <button
+                            onClick={onOpenTraining}
+                            className='px-2.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[8px] font-black uppercase italic active:scale-95'
+                          >
+                            PE
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 {/* Acciones de Partido */}
                 <div className='grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1'>
                   <button
@@ -478,22 +768,117 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                 </div>
               </div>
             ) : (
-              <div className='bg-slate-900/80 rounded-3xl p-6 text-center space-y-3 border border-red-500/20'>
-                <XCircle size={36} className='text-red-400 mx-auto' />
-                <h3 className='text-sm font-black uppercase italic text-white'>Eliminado de la Competición</h3>
-                <p className='text-xs font-bold text-slate-300 max-w-sm mx-auto'>
-                  Tu equipo ha quedado fuera de la Champions League esta temporada. Sigue compitiendo en tu Liga Nacional para clasificar de nuevo el próximo año.
+              <div className='bg-slate-900/80 rounded-3xl p-6 text-center space-y-4 border border-red-500/30 shadow-xl'>
+                <XCircle size={40} className='text-red-400 mx-auto' />
+                <div>
+                  <span className='text-[8px] font-black uppercase tracking-widest text-red-400 bg-red-500/10 px-3 py-1 rounded-full border border-red-500/30'>
+                    Eliminado de la Competición
+                  </span>
+                  <h3 className='text-sm font-black uppercase italic text-white mt-2'>
+                    Tu Club Ha Sido Eliminado
+                  </h3>
+                  <p className='text-xs font-bold text-slate-300 max-w-sm mx-auto mt-1'>
+                    Tu equipo ha quedado fuera de la Champions League esta temporada. Puedes simular el resto del torneo para ver al campeón o regresar a competir en tu Liga Nacional.
+                  </p>
+                </div>
+
+                <div className='flex flex-col sm:flex-row gap-2 justify-center pt-2'>
+                  {onSimulateAllChampions && !isFinished && (
+                    <button
+                      onClick={onSimulateAllChampions}
+                      className='bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-5 py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest active:scale-95 transition-all shadow flex items-center justify-center gap-2'
+                    >
+                      <Zap size={14} className='text-yellow-300' /> Simular Resto de la Champions League
+                    </button>
+                  )}
+                  {onBackToCareer && (
+                    <button
+                      onClick={onBackToCareer}
+                      className='bg-slate-800 hover:bg-slate-700 text-slate-200 px-5 py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest border border-white/10 active:scale-95 transition-all'
+                    >
+                      Volver a la Liga Nacional
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* SUB-PESTAÑA: TÁCTICA & PIZARRA */}
+        {subTab === 'tactic' && (
+          <motion.div
+            key='tactic'
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className='space-y-4'
+          >
+            <div className='bg-slate-900/80 rounded-3xl p-5 border border-blue-500/30 space-y-4 shadow-xl'>
+              <div className='flex items-center justify-between'>
+                <div>
+                  <p className='text-[9px] font-black uppercase tracking-widest text-amber-400'>
+                    Pizarra Táctica · {totalTeamStrength} Puntos de Fuerza
+                  </p>
+                  <h3 className='text-base font-black uppercase italic text-white mt-0.5'>
+                    Distribución Táctica para Europa
+                  </h3>
+                </div>
+                <div className='w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30'>
+                  <Target size={20} />
+                </div>
+              </div>
+
+              <div className='bg-black/40 rounded-2xl p-3.5 border border-white/5'>
+                <p className='text-[10px] font-bold text-slate-300 leading-relaxed'>
+                  Puntos totales a distribuir: <strong className='text-amber-300'>{baseTactic.att} + {baseTactic.opp} + {baseTactic.def} = {totalTeamStrength} pts</strong>.
+                  Ajusta la estrategia para los cruces de Champions respetando los límites de plantilla (5-5-4).
                 </p>
-                {onSimulateAllChampions && !isFinished && (
+              </div>
+
+              {/* Grid de opciones tácticas */}
+              <div className='grid grid-cols-3 gap-2.5'>
+                {tacticOptionsList.map(o => {
+                  const active = sameDist(career.tactic || baseTactic, o);
+                  return (
+                    <button
+                      key={`${o.att}-${o.opp}-${o.def}`}
+                      onClick={() => onSetTactic && onSetTactic(o)}
+                      className={`py-3.5 rounded-2xl border text-center transition-all active:scale-95 shadow ${
+                        active
+                          ? 'bg-gradient-to-br from-amber-400 to-amber-500 border-amber-300 text-slate-950 font-black'
+                          : 'bg-slate-900/60 hover:bg-slate-800 border-white/10 text-white'
+                      }`}
+                    >
+                      <p className='text-base font-black italic tabular-nums'>{o.att}-{o.opp}-{o.def}</p>
+                      <p className={`text-[7px] font-black uppercase tracking-wider ${active ? 'text-slate-900/80' : 'text-slate-400'}`}>
+                        ATT · OPP · DEF
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Botones de Entrenamiento y PE */}
+              <div className='pt-2 border-t border-white/5 grid grid-cols-1 sm:grid-cols-2 gap-2'>
+                {onOpenTraining && (
                   <button
-                    onClick={onSimulateAllChampions}
-                    className='mt-2 bg-slate-800 hover:bg-slate-700 text-white px-5 py-3 rounded-2xl text-[10px] font-black uppercase italic tracking-widest border border-white/10 transition-all active:scale-95'
+                    onClick={onOpenTraining}
+                    className='p-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-[9px] font-black uppercase italic tracking-wider flex items-center justify-center gap-1.5 active:scale-95 shadow'
                   >
-                    Simular Resto de la Champions League
+                    <Dumbbell size={14} /> Subir Atributos ({career.pe || 0} PE)
+                  </button>
+                )}
+                {onOpenDrill && (
+                  <button
+                    onClick={onOpenDrill}
+                    className='p-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-[9px] font-black uppercase italic tracking-wider border border-white/10 flex items-center justify-center gap-1.5 active:scale-95'
+                  >
+                    <Dices size={14} className='text-amber-400' /> Lanzar Dado de Entreno (1D6)
                   </button>
                 )}
               </div>
-            )}
+            </div>
           </motion.div>
         )}
 
@@ -629,16 +1014,36 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                           }
                         }
 
+                        const isTwoLegged = p !== 'Final';
+                        const hasIda = m.sh !== null && m.sa !== null;
+                        const hasVuelta = isTwoLegged && m.sh2 !== null && m.sh2 !== undefined && m.sa2 !== null && m.sa2 !== undefined;
+                        const totH = (m.sh || 0) + (m.sh2 || 0);
+                        const totA = (m.sa || 0) + (m.sa2 || 0);
+
                         return (
                           <div
                             key={mi}
-                            className={`rounded-2xl p-3 border transition-all ${
+                            className={`rounded-2xl p-3 border transition-all space-y-2 ${
                               isMyMatch
-                                ? 'bg-blue-950/60 border-blue-400/60 shadow-lg'
-                                : 'bg-slate-900/60 border-white/5'
+                                ? 'bg-blue-950/70 border-blue-400/60 shadow-lg ring-1 ring-blue-500/20'
+                                : 'bg-slate-900/80 border-white/5'
                             }`}
                           >
-                            {/* Equipo Local */}
+                            {/* Cabecera del Cruce: Estado de la Eliminatoria */}
+                            {isTwoLegged && (
+                              <div className='flex items-center justify-between text-[7.5px] font-black uppercase tracking-wider pb-1 border-b border-white/5'>
+                                <span className={hasVuelta ? 'text-emerald-400' : hasIda ? 'text-amber-400' : 'text-slate-400'}>
+                                  {hasVuelta ? 'Eliminatoria Finalizada' : hasIda ? 'Ida Disputada · Vuelta Pendiente' : 'Ida y Vuelta'}
+                                </span>
+                                {hasVuelta && (
+                                  <span className='bg-blue-500/20 text-blue-300 px-2 py-0.2 rounded-full border border-blue-500/30'>
+                                    Global: {totH} - {totA}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Fila Equipo 1 (Local en Ida) */}
                             <div className='flex justify-between items-center py-1'>
                               <div className='flex items-center gap-2 flex-1 truncate'>
                                 <Shield color1={h?.color1} color2={h?.color2} initial={h?.name} size='xs' isFlag={h?.isFlag} />
@@ -646,14 +1051,32 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                                   {h?.name || 'Por Definir'}
                                 </span>
                               </div>
-                              <div className='flex items-center gap-1 tabular-nums font-black text-[10px] bg-black/40 px-2 py-0.5 rounded-lg'>
-                                {m.sh !== null && <span>{m.sh}</span>}
-                                {p !== 'Final' && m.sh2 !== null && <span className='text-slate-400 text-[8px]'>({m.sh2})</span>}
-                                {m.penH !== null && m.penH !== undefined && <span className='text-red-400 text-[8px] font-black'>[{m.penH}]</span>}
+                              <div className='flex items-center gap-1.5 tabular-nums text-[9px]'>
+                                {hasIda && (
+                                  <span className='bg-black/40 text-slate-300 px-1.5 py-0.5 rounded font-bold' title='Partido de Ida'>
+                                    {m.sh}
+                                  </span>
+                                )}
+                                {hasVuelta && (
+                                  <span className='bg-black/40 text-slate-300 px-1.5 py-0.5 rounded font-bold' title='Partido de Vuelta'>
+                                    {m.sh2}
+                                  </span>
+                                )}
+                                {hasVuelta && (
+                                  <span className='bg-blue-600 text-white font-black px-2 py-0.5 rounded shadow-sm' title='Marcador Global'>
+                                    {totH}
+                                  </span>
+                                )}
+                                {!hasIda && !isTwoLegged && m.sh !== null && (
+                                  <span className='bg-blue-600 text-white font-black px-2 py-0.5 rounded'>{m.sh}</span>
+                                )}
+                                {m.penH !== null && m.penH !== undefined && (
+                                  <span className='text-amber-300 text-[8px] font-black'>[{m.penH}]</span>
+                                )}
                               </div>
                             </div>
 
-                            {/* Equipo Visitante */}
+                            {/* Fila Equipo 2 (Visitante en Ida) */}
                             <div className='flex justify-between items-center py-1 border-t border-white/5'>
                               <div className='flex items-center gap-2 flex-1 truncate'>
                                 <Shield color1={a?.color1} color2={a?.color2} initial={a?.name} size='xs' isFlag={a?.isFlag} />
@@ -661,18 +1084,36 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                                   {a?.name || 'Por Definir'}
                                 </span>
                               </div>
-                              <div className='flex items-center gap-1 tabular-nums font-black text-[10px] bg-black/40 px-2 py-0.5 rounded-lg'>
-                                {m.sa !== null && <span>{m.sa}</span>}
-                                {p !== 'Final' && m.sa2 !== null && <span className='text-slate-400 text-[8px]'>({m.sa2})</span>}
-                                {m.penA !== null && m.penA !== undefined && <span className='text-red-400 text-[8px] font-black'>[{m.penA}]</span>}
+                              <div className='flex items-center gap-1.5 tabular-nums text-[9px]'>
+                                {hasIda && (
+                                  <span className='bg-black/40 text-slate-300 px-1.5 py-0.5 rounded font-bold' title='Partido de Ida'>
+                                    {m.sa}
+                                  </span>
+                                )}
+                                {hasVuelta && (
+                                  <span className='bg-black/40 text-slate-300 px-1.5 py-0.5 rounded font-bold' title='Partido de Vuelta'>
+                                    {m.sa2}
+                                  </span>
+                                )}
+                                {hasVuelta && (
+                                  <span className='bg-blue-600 text-white font-black px-2 py-0.5 rounded shadow-sm' title='Marcador Global'>
+                                    {totA}
+                                  </span>
+                                )}
+                                {!hasIda && !isTwoLegged && m.sa !== null && (
+                                  <span className='bg-blue-600 text-white font-black px-2 py-0.5 rounded'>{m.sa}</span>
+                                )}
+                                {m.penA !== null && m.penA !== undefined && (
+                                  <span className='text-amber-300 text-[8px] font-black'>[{m.penA}]</span>
+                                )}
                               </div>
                             </div>
 
-                            {/* Ganador */}
+                            {/* Ganador / Clasificado */}
                             {winner && (
-                              <div className='mt-1.5 pt-1.5 border-t border-white/5 flex items-center justify-between text-[8px] font-black uppercase text-emerald-400'>
-                                <span>{p === 'Final' ? '🏆 Campeón:' : 'Pasa a siguiente ronda:'}</span>
-                                <span className='truncate font-black text-white max-w-[120px]'>{winner.name}</span>
+                              <div className='mt-1 pt-1.5 border-t border-white/5 flex items-center justify-between text-[8px] font-black uppercase text-emerald-400'>
+                                <span>{p === 'Final' ? '🏆 Campeón:' : 'Pasa de Ronda:'}</span>
+                                <span className='truncate font-black text-white max-w-[130px]'>{winner.name}</span>
                               </div>
                             )}
                           </div>

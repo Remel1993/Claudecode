@@ -6,7 +6,7 @@ import {
   Briefcase, Target, Sparkles, AlertTriangle, Check, X, Globe, History, Newspaper, Play,
   FileSignature, ShieldCheck, Pencil, CalendarPlus, Dumbbell, Zap, HeartPulse,
   Calendar, Award, ArrowUp, ArrowDown, Minus, CheckCircle, XCircle, ArrowRight, Lock,
-  Plane, Mail, FastForward, Clock
+  Plane, Mail, FastForward, Clock, RotateCcw
 } from 'lucide-react';
 import {
   TIERS, CLASS_INFO, classOf, tierCaps, tacticalOptions, sameDist, peCostFor,
@@ -14,7 +14,7 @@ import {
   isSquadMaxed, careerSpells, CONTRACT_SEASONS, CL_SPOTS, signingRepBonus,
   generateRumors, getRejectionReason, getMarketVacancies, SPECIAL_OFFICE_WEEKS,
   getSpecialOfficeWeeks, calculateCurrentSeasonWeek, getContractObjectivesForTeam,
-  calculateBoardConfidence
+  calculateBoardConfidence, clPhaseLabel, getChampionsScheduledWeeks
 } from '../lib/career';
 import { TrainingModal } from './TrainingModal';
 import { TrainingDrillModal } from './TrainingDrillModal';
@@ -424,14 +424,101 @@ export const CareerView = ({
     const loss = l.filter((x: any) => x.result === 'L').length;
     const totalPlayed = l.length;
     const pending = Math.max(0, totalRoundsCount - totalPlayed);
-    return { wins: w, draws: d, losses: loss, pending };
+    const clMatches = l.filter((x: any) => x.isChampions).length;
+    const leagueMatches = l.filter((x: any) => !x.isChampions).length;
+    return { wins: w, draws: d, losses: loss, pending, clMatches, leagueMatches };
   }, [career.seasonLog, totalRoundsCount]);
 
+  // Último partido disputado por el mánager (de Liga o de Champions)
+  const lastPlayedMatchOverall = useMemo(() => {
+    const log = career.seasonLog || [];
+    if (log.length === 0) return null;
+    const entry = log[0];
+    const allTeams = (career.div === 2 ? comp?.teams2 : comp?.teams) || [];
+    const clTeams = clComp?.teams || [];
+
+    let rivalTeam: any = null;
+    let aggregateInfo: any = null;
+
+    if (entry.isChampions) {
+      rivalTeam = clTeams.find((t: any) => t.name === entry.rival || t.name === entry.rival?.name || t.id === entry.rival?.id) || {
+        name: entry.rival?.name || entry.rival || 'Rival Europeo',
+        color1: '#1e3a8a',
+        color2: '#3b82f6'
+      };
+
+      // Si fue partido eliminatorio de ida y vuelta en Champions
+      const careerClTeam = clTeams.find((t: any) => t.id === clComp?.careerTeamId) ||
+        clTeams.find((t: any) => t.name === (clComp?.careerTeamName || team?.name)) || null;
+
+      const phaseKey = ['Octavos', 'Cuartos', 'Semis'].find(p => (entry.phase === p || (entry.competitionLabel || '').includes(p)));
+      if (phaseKey && clComp?.bracket?.[phaseKey] && careerClTeam) {
+        const bMatches = Array.isArray(clComp.bracket[phaseKey]) ? clComp.bracket[phaseKey] : [clComp.bracket[phaseKey]];
+        const bMatch = bMatches.find((bm: any) => bm && (bm.hId === careerClTeam.id || bm.aId === careerClTeam.id));
+        if (bMatch && bMatch.sh !== null) {
+          const teamIsHId = bMatch.hId === careerClTeam.id;
+          const hasVuelta = bMatch.sh2 !== null && bMatch.sh2 !== undefined;
+          const totH = (bMatch.sh || 0) + (bMatch.sh2 || 0);
+          const totA = (bMatch.sa || 0) + (bMatch.sa2 || 0);
+          const myTot = teamIsHId ? totH : totA;
+          const rivalTot = teamIsHId ? totA : totH;
+
+          let qualified = null;
+          if (hasVuelta) {
+            if (totH > totA) qualified = teamIsHId;
+            else if (totA > totH) qualified = !teamIsHId;
+            else if (bMatch.penH !== null && bMatch.penH !== undefined) {
+              qualified = bMatch.penH > bMatch.penA ? teamIsHId : !teamIsHId;
+            }
+          }
+
+          aggregateInfo = {
+            phaseName: phaseKey,
+            leg1Score: `${bMatch.sh} - ${bMatch.sa}`,
+            leg2Score: hasVuelta ? `${bMatch.sh2} - ${bMatch.sa2}` : null,
+            globalScoreText: hasVuelta ? `${myTot} - ${rivalTot}` : null,
+            penaltiesText: (bMatch.penH !== null && bMatch.penH !== undefined) ? `(${bMatch.penH}-${bMatch.penA} pen.)` : null,
+            qualified
+          };
+        }
+      }
+    } else {
+      rivalTeam = allTeams.find((t: any) => t.name === entry.rival || t.name === entry.rival?.name || t.id === entry.rival?.id) || {
+        name: entry.rival?.name || entry.rival || `Rival J${entry.matchday}`,
+        color1: '#334155',
+        color2: '#1e293b'
+      };
+    }
+
+    const isHome = entry.isHome !== undefined ? entry.isHome : true;
+
+    return {
+      ...entry,
+      competitionLabel: entry.isChampions
+        ? `UEFA Champions League · ${clPhaseLabel(entry.phase || 'groups')}`
+        : `${comp?.name || 'Liga'} · Jornada ${entry.matchday}`,
+      rivalTeam,
+      isHome,
+      scoreH: isHome ? entry.gf : entry.ga,
+      scoreA: isHome ? entry.ga : entry.gf,
+      homeTeam: isHome ? team : rivalTeam,
+      awayTeam: isHome ? rivalTeam : team,
+      aggregateInfo
+    };
+  }, [career.seasonLog, comp, clComp, team, career.div]);
+
+  // Calendario Global de la Temporada (Liga Nacional + Champions League + Oficinas / FIFA)
   const calendarMonths = useMemo(() => {
     const allTeams = (career.div === 2 ? comp?.teams2 : comp?.teams) || [];
+    const clTeams = clComp?.teams || [];
     const logMap = new Map();
+    const clLogList: any[] = [];
     (career.seasonLog || []).forEach((l: any) => {
-      logMap.set(l.matchday, l);
+      if (l.isChampions) {
+        clLogList.push(l);
+      } else {
+        logMap.set(l.matchday, l);
+      }
     });
 
     const teamFixtures: any[] = [];
@@ -448,6 +535,7 @@ export const CareerView = ({
             matchday,
             isHome,
             rival,
+            isChampions: false,
             played: !!logEntry,
             result: logEntry?.result || null,
             gf: logEntry?.gf,
@@ -468,6 +556,7 @@ export const CareerView = ({
           matchday,
           isHome,
           rival: r,
+          isChampions: false,
           played: !!logEntry,
           result: logEntry?.result || null,
           gf: logEntry?.gf,
@@ -479,7 +568,71 @@ export const CareerView = ({
       });
     }
 
+    // Identificar el equipo del modo carrera en Champions (C1)
+    const careerClTeam = clTeams.find((t: any) => t.id === clComp?.careerTeamId) ||
+      clTeams.find((t: any) => t.name === (clComp?.careerTeamName || team?.name)) || null;
+    const isUserInCl = isClQualified || !!careerClTeam;
+
+    // Buscar historial cronológico de partidos de Champions jugados por el usuario
+    const userClHistoryMatches: any[] = [];
+    if (Array.isArray(clComp?.history) && careerClTeam) {
+      const chronologicalHistory = [...clComp.history].reverse();
+      chronologicalHistory.forEach((h: any) => {
+        const m = (h.results || []).find((r: any) => r.hId === careerClTeam.id || r.aId === careerClTeam.id);
+        if (m) {
+          const ht = clTeams.find((t: any) => t.id === m.hId);
+          const at = clTeams.find((t: any) => t.id === m.aId);
+          const isHome = m.hId === careerClTeam.id;
+          const myScore = isHome ? m.sh : m.sa;
+          const rivalScore = isHome ? m.sa : m.sh;
+          const rivalTeam = isHome ? at : ht;
+          const res = myScore > rivalScore ? 'W' : myScore === rivalScore ? 'D' : 'L';
+          userClHistoryMatches.push({
+            dayLabel: h.day,
+            isHome,
+            myScore,
+            rivalScore,
+            rivalTeam,
+            result: res,
+            penH: m.penH,
+            penA: m.penA
+          });
+        }
+      });
+    }
+
+    // Determinar si el usuario fue eliminado y en qué fase
+    let clEliminatedPhase: string | null = null;
+    if (clComp && careerClTeam) {
+      if (clComp.phase !== 'groups') {
+        const userGroup = (clComp.groups || []).find((g: any) => g.teamIds?.includes(careerClTeam.id));
+        if (userGroup) {
+          const groupTeams = clTeams.filter((t: any) => userGroup.teamIds?.includes(t.id))
+            .sort((a: any, b: any) => (b.pts || 0) - (a.pts || 0) || ((b.gf || 0) - (b.ga || 0)) - ((a.gf || 0) - (a.ga || 0)) || (b.gf || 0) - (a.gf || 0));
+          const top2 = groupTeams.slice(0, 2).map((t: any) => t.id);
+          if (!top2.includes(careerClTeam.id)) {
+            clEliminatedPhase = 'Fase de Grupos';
+          }
+        }
+        if (!clEliminatedPhase && clComp.bracket) {
+          if (clComp.phase === 'Cuartos' || clComp.phase === 'Semis' || clComp.phase === 'Final' || clComp.phase === 'Terminado') {
+            const inCuartos = (clComp.bracket.Cuartos || []).some((m: any) => m && (m.hId === careerClTeam.id || m.aId === careerClTeam.id));
+            if (!inCuartos) clEliminatedPhase = 'Octavos de Final';
+          }
+          if (!clEliminatedPhase && (clComp.phase === 'Semis' || clComp.phase === 'Final' || clComp.phase === 'Terminado')) {
+            const inSemis = (clComp.bracket.Semis || []).some((m: any) => m && (m.hId === careerClTeam.id || m.aId === careerClTeam.id));
+            if (!inSemis) clEliminatedPhase = 'Cuartos de Final';
+          }
+          if (!clEliminatedPhase && (clComp.phase === 'Final' || clComp.phase === 'Terminado')) {
+            const inFinal = (clComp.bracket.Final || []).some((m: any) => m && (m.hId === careerClTeam.id || m.aId === careerClTeam.id));
+            if (!inFinal) clEliminatedPhase = 'Semifinales';
+          }
+        }
+      }
+    }
+
     const leagueOfficeWeeks = getSpecialOfficeWeeks(totalRoundsCount);
+    const scheduledClWeeks = getChampionsScheduledWeeks(totalRoundsCount);
     const totalSeasonWeeks = totalRoundsCount + leagueOfficeWeeks.length;
 
     const monthNames = [
@@ -492,6 +645,8 @@ export const CareerView = ({
 
     for (let w = 1; w <= totalSeasonWeeks; w++) {
       const office = leagueOfficeWeeks.find(o => o.week === w);
+      const clScheduled = scheduledClWeeks.find(c => c.defaultWeek === w);
+
       if (office) {
         allWeeksList.push({
           weekNum: w,
@@ -510,11 +665,114 @@ export const CareerView = ({
           played: false,
           result: null
         };
+
         allWeeksList.push({
           weekNum: w,
           type: 'match',
           isSpecial: false,
+          isChampions: false,
           ...fixture
+        });
+      }
+
+      // Si coincide con semana continental de Champions League
+      if (clScheduled && isUserInCl) {
+        const roundIdx = clScheduled.clRoundIdx;
+        let isPlayed = false;
+        let isEliminated = false;
+        let isProbable = false;
+        let result = null;
+        let scoreText = null;
+        let clRival: any = null;
+        let isHome = roundIdx % 2 === 0;
+
+        if (roundIdx < 6) {
+          // Fase de grupos (jornadas 0 a 5)
+          const playedMatch = userClHistoryMatches[roundIdx] || clLogList[roundIdx];
+          if (playedMatch) {
+            isPlayed = true;
+            result = playedMatch.result;
+            scoreText = `${playedMatch.myScore ?? playedMatch.gf} - ${playedMatch.rivalScore ?? playedMatch.ga}`;
+            clRival = playedMatch.rivalTeam || (clTeams.find((t: any) => t.name === playedMatch.rival)) || { name: 'Rival Champions', color1: '#1e3a8a', color2: '#3b82f6' };
+          } else {
+            // No jugado todavía en grupos
+            const userGroup = (clComp?.groups || []).find((g: any) => g.teamIds?.includes(careerClTeam?.id));
+            if (userGroup) {
+              const rivalsInGroup = clTeams.filter((t: any) => userGroup.teamIds?.includes(t.id) && t.id !== careerClTeam?.id);
+              if (rivalsInGroup.length > 0) {
+                clRival = rivalsInGroup[roundIdx % rivalsInGroup.length];
+              }
+            }
+            if (!clRival) {
+              clRival = { name: 'Rival de Grupo', color1: '#1e3a8a', color2: '#3b82f6' };
+            }
+          }
+        } else {
+          // Rondas eliminatorias (Octavos: 6-7, Cuartos: 8-9, Semis: 10-11, Final: 12)
+          if (clEliminatedPhase) {
+            const elimAtGroup = clEliminatedPhase === 'Fase de Grupos';
+            const elimAtOctavos = clEliminatedPhase === 'Octavos de Final';
+            const elimAtCuartos = clEliminatedPhase === 'Cuartos de Final';
+            const elimAtSemis = clEliminatedPhase === 'Semifinales';
+
+            if (elimAtGroup || (elimAtOctavos && roundIdx >= 8) || (elimAtCuartos && roundIdx >= 10) || (elimAtSemis && roundIdx >= 12)) {
+              isEliminated = true;
+            }
+          }
+
+          if (!isEliminated) {
+            const playedMatch = userClHistoryMatches[roundIdx] || clLogList[roundIdx];
+            if (playedMatch) {
+              isPlayed = true;
+              result = playedMatch.result;
+              scoreText = `${playedMatch.myScore ?? playedMatch.gf} - ${playedMatch.rivalScore ?? playedMatch.ga}`;
+              clRival = playedMatch.rivalTeam || (clTeams.find((t: any) => t.name === playedMatch.rival)) || { name: 'Rival Eliminatoria', color1: '#1e3a8a', color2: '#3b82f6' };
+            } else {
+              let isCurrentPhase = false;
+              if (roundIdx === 6 || roundIdx === 7) isCurrentPhase = clComp?.phase === 'Octavos';
+              else if (roundIdx === 8 || roundIdx === 9) isCurrentPhase = clComp?.phase === 'Cuartos';
+              else if (roundIdx === 10 || roundIdx === 11) isCurrentPhase = clComp?.phase === 'Semis';
+              else if (roundIdx === 12) isCurrentPhase = clComp?.phase === 'Final';
+
+              if (isCurrentPhase && clComp?.bracket) {
+                const bracketPhase = clComp.bracket[clComp.phase];
+                const matches = Array.isArray(bracketPhase) ? bracketPhase : [bracketPhase].filter(Boolean);
+                const matchInBracket = matches.find((m: any) => m && (m.hId === careerClTeam?.id || m.aId === careerClTeam?.id));
+                if (matchInBracket) {
+                  const isVuelta = (roundIdx === 7 || roundIdx === 9 || roundIdx === 11);
+                  const isH = isVuelta ? matchInBracket.aId === careerClTeam?.id : matchInBracket.hId === careerClTeam?.id;
+                  const rId = isH ? matchInBracket.aId : matchInBracket.hId;
+                  isHome = isH;
+                  clRival = clTeams.find((t: any) => t.id === rId) || { name: 'Rival Europeo', color1: '#1e3a8a', color2: '#3b82f6' };
+                }
+              }
+
+              if (!clRival) {
+                isProbable = true;
+                clRival = { name: 'Por Determinar (según cuadro)', color1: '#1e3a8a', color2: '#3b82f6' };
+              }
+            }
+          }
+        }
+
+        allWeeksList.push({
+          weekNum: w,
+          type: 'match',
+          isSpecial: false,
+          isChampions: true,
+          clPhaseLabel: clScheduled.label,
+          shortLabel: clScheduled.shortLabel,
+          matchday: `UCL-${roundIdx + 1}`,
+          isHome,
+          rival: clRival || { name: 'Rival Champions', color1: '#1e3a8a', color2: '#3b82f6' },
+          played: isPlayed,
+          isEliminated,
+          isProbable,
+          eliminatedPhase: clEliminatedPhase,
+          result,
+          scoreText,
+          repEarned: isPlayed ? (result === 'W' ? 0.8 : result === 'D' ? 0.3 : -0.1) : null,
+          peEarned: isPlayed ? (result === 'W' ? 3 : result === 'D' ? 2 : 0) : null
         });
       }
     }
@@ -523,7 +781,7 @@ export const CareerView = ({
     let currentWeekIdx = 0;
     for (let m = 0; m < monthNames.length; m++) {
       const isLast = m === monthNames.length - 1;
-      const weeksForThisMonth = isLast ? Math.max(1, allWeeksList.length - currentWeekIdx) : 4;
+      const weeksForThisMonth = isLast ? Math.max(1, allWeeksList.length - currentWeekIdx) : Math.ceil(allWeeksList.length / monthNames.length);
       const monthWeeks = allWeeksList.slice(currentWeekIdx, currentWeekIdx + weeksForThisMonth);
       currentWeekIdx += weeksForThisMonth;
       if (monthWeeks.length > 0) {
@@ -535,7 +793,7 @@ export const CareerView = ({
     }
 
     return monthsResult;
-  }, [schedule, comp, career.div, career.teamId, career.seasonLog, totalRoundsCount]);
+  }, [schedule, comp, clComp, career.div, career.teamId, career.seasonLog, totalRoundsCount, isClQualified, team]);
 
   const handleApplyToJob = (v: any) => {
     if (onSubmitApplication) {
@@ -867,6 +1125,105 @@ export const CareerView = ({
                   feedback={career.lastSimulationFeedback}
                   onDismiss={onDismissSimulationFeedback}
                 />
+              )}
+
+              {/* CARD DE ÚLTIMO PARTIDO DISPUTADO CON SU RESULTADO */}
+              {lastPlayedMatchOverall && (
+                <div className='bg-gradient-to-r from-slate-900/90 via-slate-900/60 to-slate-900/90 rounded-3xl p-4 border border-white/10 shadow-lg space-y-2.5'>
+                  <div className='flex items-center justify-between'>
+                    <div className='flex items-center gap-1.5'>
+                      <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${
+                        lastPlayedMatchOverall.isChampions
+                          ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                          : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      }`}>
+                        {lastPlayedMatchOverall.isChampions ? '⭐ Champions League' : '🏆 Liga Nacional'}
+                      </span>
+                      <span className='text-[8px] font-bold text-slate-400'>
+                        {lastPlayedMatchOverall.competitionLabel}
+                      </span>
+                    </div>
+                    <span className={`text-[8px] font-black uppercase px-2.5 py-0.5 rounded-full ${
+                      lastPlayedMatchOverall.result === 'W'
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                        : lastPlayedMatchOverall.result === 'D'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                        : 'bg-red-500/20 text-red-300 border border-red-500/40'
+                    }`}>
+                      {lastPlayedMatchOverall.result === 'W' ? 'Victoria 🏆' : lastPlayedMatchOverall.result === 'D' ? 'Empate 🤝' : 'Derrota ❌'}
+                    </span>
+                  </div>
+
+                  <div className='bg-black/40 rounded-2xl p-3 border border-white/5 flex items-center justify-between gap-2'>
+                    <div className='flex items-center gap-2 min-w-0 flex-1'>
+                      <Shield
+                        color1={lastPlayedMatchOverall.homeTeam?.color1}
+                        color2={lastPlayedMatchOverall.homeTeam?.color2}
+                        initial={lastPlayedMatchOverall.homeTeam?.name}
+                        size='sm'
+                        isFlag={lastPlayedMatchOverall.homeTeam?.isFlag}
+                      />
+                      <span className={`text-[10px] font-black uppercase truncate ${lastPlayedMatchOverall.homeTeam?.id === team?.id || lastPlayedMatchOverall.isHome ? 'text-amber-300' : 'text-white'}`}>
+                        {lastPlayedMatchOverall.homeTeam?.name}
+                      </span>
+                    </div>
+
+                    <div className='text-center shrink-0 px-3.5 py-1 bg-black/60 rounded-xl border border-white/10'>
+                      <span className='text-sm font-black italic text-white tabular-nums tracking-wider'>
+                        {lastPlayedMatchOverall.scoreH} - {lastPlayedMatchOverall.scoreA}
+                      </span>
+                    </div>
+
+                    <div className='flex items-center justify-end gap-2 min-w-0 flex-1 text-right'>
+                      <span className={`text-[10px] font-black uppercase truncate ${lastPlayedMatchOverall.awayTeam?.id === team?.id || !lastPlayedMatchOverall.isHome ? 'text-amber-300' : 'text-white'}`}>
+                        {lastPlayedMatchOverall.awayTeam?.name}
+                      </span>
+                      <Shield
+                        color1={lastPlayedMatchOverall.awayTeam?.color1}
+                        color2={lastPlayedMatchOverall.awayTeam?.color2}
+                        initial={lastPlayedMatchOverall.awayTeam?.name}
+                        size='sm'
+                        isFlag={lastPlayedMatchOverall.awayTeam?.isFlag}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Resumen Global de Eliminatoria en Champions */}
+                  {lastPlayedMatchOverall.aggregateInfo && (
+                    <div className='bg-blue-950/70 rounded-2xl p-2.5 border border-blue-400/30 flex flex-wrap items-center justify-between gap-2 text-[8px] font-bold text-slate-200'>
+                      <div className='flex items-center gap-2'>
+                        <span className='text-blue-300 font-black uppercase tracking-wider'>Global Eliminatoria:</span>
+                        <span className='bg-black/60 px-2 py-0.5 rounded-lg font-black text-white text-[9px] border border-white/10'>
+                          Ida: {lastPlayedMatchOverall.aggregateInfo.leg1Score}
+                        </span>
+                        {lastPlayedMatchOverall.aggregateInfo.leg2Score && (
+                          <span className='bg-black/60 px-2 py-0.5 rounded-lg font-black text-white text-[9px] border border-white/10'>
+                            Vuelta: {lastPlayedMatchOverall.aggregateInfo.leg2Score}
+                          </span>
+                        )}
+                        {lastPlayedMatchOverall.aggregateInfo.globalScoreText && (
+                          <span className='bg-blue-600 px-2.5 py-0.5 rounded-lg font-black text-white text-[9px] shadow-sm'>
+                            GLOBAL: {lastPlayedMatchOverall.aggregateInfo.globalScoreText} {lastPlayedMatchOverall.aggregateInfo.penaltiesText || ''}
+                          </span>
+                        )}
+                      </div>
+                      {lastPlayedMatchOverall.aggregateInfo.qualified !== null && (
+                        <span className={`px-2 py-0.5 rounded-full font-black uppercase tracking-wider ${
+                          lastPlayedMatchOverall.aggregateInfo.qualified
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                        }`}>
+                          {lastPlayedMatchOverall.aggregateInfo.qualified ? '✅ ¡Clasificado a siguiente ronda!' : '❌ Eliminado en esta ronda'}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  <div className='flex items-center justify-between text-[8px] font-bold text-slate-400 px-1'>
+                    <span>Balance: +{lastPlayedMatchOverall.pe || 0} PE ganados</span>
+                    <span className='text-amber-400 font-black'>+{lastPlayedMatchOverall.rep || 0} Reputación</span>
+                  </div>
+                </div>
               )}
 
               {divisionFinished ? (
@@ -1596,6 +1953,8 @@ export const CareerView = ({
               <div className='flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1'>
                 {[
                   { key: 'TODOS', label: 'Todos', count: log.length + matchCounts.pending, color: 'bg-slate-800 text-slate-200 border-white/10' },
+                  { key: 'LIGA', label: 'Liga', count: matchCounts.leagueMatches || totalRoundsCount, color: 'bg-amber-950/60 text-amber-300 border-amber-500/30' },
+                  { key: 'CHAMPIONS', label: 'Champions', count: matchCounts.clMatches || 0, color: 'bg-blue-950/60 text-blue-300 border-blue-500/30' },
                   { key: 'VICTORIA', label: 'Victorias', count: matchCounts.wins, color: 'bg-emerald-950/60 text-emerald-300 border-emerald-500/30' },
                   { key: 'EMPATE', label: 'Empates', count: matchCounts.draws, color: 'bg-slate-900/80 text-slate-300 border-slate-700/50' },
                   { key: 'DERROTA', label: 'Derrotas', count: matchCounts.losses, color: 'bg-red-950/60 text-red-300 border-red-500/30' },
@@ -1624,6 +1983,8 @@ export const CareerView = ({
                   const filteredItems = month.items.filter(item => {
                     if (calendarFilter === 'TODOS') return true;
                     if (item.isSpecial) return false;
+                    if (calendarFilter === 'LIGA') return !item.isChampions;
+                    if (calendarFilter === 'CHAMPIONS') return item.isChampions;
                     if (calendarFilter === 'VICTORIA') return item.result === 'W';
                     if (calendarFilter === 'EMPATE') return item.result === 'D';
                     if (calendarFilter === 'DERROTA') return item.result === 'L';
@@ -1680,30 +2041,110 @@ export const CareerView = ({
                           const isW = item.result === 'W';
                           const isD = item.result === 'D';
                           const isL = item.result === 'L';
+                          const isUCL = !!item.isChampions;
+                          const isEliminated = isUCL && item.isEliminated;
+                          const isProbable = isUCL && item.isProbable && !item.played;
+
+                          if (isEliminated) {
+                            return (
+                              <div
+                                key={`ucl-elim-${item.weekNum}-${item.clPhaseLabel}`}
+                                className='rounded-2xl p-3 border border-red-500/20 bg-slate-950/40 space-y-1.5 opacity-80'
+                              >
+                                <div className='flex items-center justify-between'>
+                                  <span className='text-[8px] font-black uppercase tracking-wider flex items-center gap-1 text-slate-400'>
+                                    <Trophy size={10} className='text-slate-500' />
+                                    {item.shortLabel || 'Champions League'}
+                                  </span>
+                                  <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20'>
+                                    Eliminado
+                                  </span>
+                                </div>
+                                <div className='flex items-center justify-between gap-2'>
+                                  <div>
+                                    <p className='text-[8px] font-bold text-slate-500 uppercase'>Semana Continental</p>
+                                    <h5 className='text-xs font-bold italic text-slate-400'>
+                                      {item.eliminatedPhase ? `Eliminado en ${item.eliminatedPhase}` : 'Sin participación'}
+                                    </h5>
+                                  </div>
+                                  <span className='text-[8px] font-bold text-slate-500 uppercase bg-black/40 px-2 py-1 rounded-xl border border-white/5'>
+                                    Descanso
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          if (isProbable) {
+                            return (
+                              <div
+                                key={`ucl-prob-${item.weekNum}-${item.clPhaseLabel}`}
+                                className='rounded-2xl p-3 border border-blue-500/20 bg-gradient-to-br from-blue-950/20 via-slate-900/40 to-slate-900/60 space-y-1.5'
+                              >
+                                <div className='flex items-center justify-between'>
+                                  <span className='text-[8px] font-black uppercase tracking-wider flex items-center gap-1 text-blue-300'>
+                                    <Trophy size={10} className='text-yellow-400' />
+                                    {item.shortLabel || 'Champions League'}
+                                  </span>
+                                  <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/20'>
+                                    Fecha Probable
+                                  </span>
+                                </div>
+                                <div className='flex items-center justify-between gap-2'>
+                                  <div>
+                                    <p className='text-[8px] font-bold text-slate-400 uppercase'>Ronda Continental</p>
+                                    <h5 className='text-xs font-bold italic text-slate-300'>
+                                      Sujeto a Clasificación
+                                    </h5>
+                                  </div>
+                                  <span className='text-[8px] font-bold text-blue-400 uppercase bg-blue-500/10 px-2 py-1 rounded-xl border border-blue-500/20'>
+                                    Pendiente
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          }
 
                           return (
                             <div
-                              key={`match-${item.matchday}`}
+                              key={isUCL ? `ucl-${item.weekNum}-${item.clPhaseLabel}` : `match-${item.matchday}`}
                               className={`rounded-2xl p-3 border transition-all space-y-2 ${
-                                item.played
-                                  ? isW
-                                    ? 'bg-emerald-950/30 border-emerald-500/30 hover:border-emerald-500/50'
-                                    : isD
-                                    ? 'bg-slate-900/60 border-slate-700/40 hover:border-slate-700/60'
-                                    : 'bg-red-950/30 border-red-500/30 hover:border-red-500/50'
-                                  : 'bg-black/30 border-white/10 hover:border-white/20'
+                                isUCL
+                                  ? item.played
+                                    ? isW
+                                      ? 'bg-gradient-to-br from-blue-950/40 via-emerald-950/30 to-slate-900/70 border-emerald-500/40'
+                                      : isD
+                                      ? 'bg-gradient-to-br from-blue-950/40 via-slate-900/60 to-slate-900/70 border-slate-700/50'
+                                      : 'bg-gradient-to-br from-blue-950/40 via-red-950/30 to-slate-900/70 border-red-500/40'
+                                    : 'bg-gradient-to-br from-blue-950/40 via-indigo-950/30 to-slate-900/60 border-blue-500/30 hover:border-blue-400/50'
+                                  : item.played
+                                    ? isW
+                                      ? 'bg-emerald-950/30 border-emerald-500/30 hover:border-emerald-500/50'
+                                      : isD
+                                      ? 'bg-slate-900/60 border-slate-700/40 hover:border-slate-700/60'
+                                      : 'bg-red-950/30 border-red-500/30 hover:border-red-500/50'
+                                    : 'bg-black/30 border-white/10 hover:border-white/20'
                               }`}
                             >
                               <div className='flex items-center justify-between'>
-                                <span className='text-[8px] font-black uppercase tracking-wider text-slate-400'>
-                                  Sem. {item.weekNum} · J{item.matchday}
+                                <span className={`text-[8px] font-black uppercase tracking-wider flex items-center gap-1 ${isUCL ? 'text-blue-300' : 'text-slate-400'}`}>
+                                  {isUCL ? (
+                                    <>
+                                      <Trophy size={10} className='text-yellow-400' />
+                                      {item.shortLabel || 'Champions League'}
+                                    </>
+                                  ) : (
+                                    `Sem. ${item.weekNum} · J${item.matchday}`
+                                  )}
                                 </span>
                                 <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full ${
-                                  item.isHome
-                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                    : 'bg-slate-800 text-slate-300 border border-white/10'
+                                  isUCL
+                                    ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                                    : item.isHome
+                                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                      : 'bg-slate-800 text-slate-300 border border-white/10'
                                 }`}>
-                                  {item.isHome ? 'Casa' : 'Fuera'}
+                                  {isUCL ? 'Continental' : item.isHome ? 'Casa' : 'Fuera'}
                                 </span>
                               </div>
 
@@ -1717,7 +2158,9 @@ export const CareerView = ({
                                     isFlag={item.rival?.isFlag}
                                   />
                                   <div className='min-w-0'>
-                                    <p className='text-[8px] font-bold text-slate-400 uppercase'>vs Rival</p>
+                                    <p className='text-[8px] font-bold text-slate-400 uppercase'>
+                                      {isUCL ? 'Rival Champions' : 'vs Rival'}
+                                    </p>
                                     <h5 className='text-xs font-black uppercase italic text-white truncate'>
                                       {item.rival?.name}
                                     </h5>
@@ -1743,7 +2186,11 @@ export const CareerView = ({
                                       </span>
                                     </div>
                                   ) : (
-                                    <span className='text-[8px] font-black uppercase px-2 py-1 rounded-xl bg-slate-800/80 text-sky-300 border border-sky-500/20'>
+                                    <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-xl ${
+                                      isUCL
+                                        ? 'bg-blue-900/60 text-blue-300 border border-blue-500/30'
+                                        : 'bg-slate-800/80 text-sky-300 border border-sky-500/20'
+                                    }`}>
                                       Por disputar
                                     </span>
                                   )}
@@ -1778,6 +2225,9 @@ export const CareerView = ({
               onSimulateAllChampions={onSimulateAllChampions}
               onOpenNewSeason={onNewSeason}
               onBackToCareer={() => setTab('main')}
+              onOpenDrill={() => setShowDrillModal(true)}
+              onOpenTraining={() => setShowTrainingModal(true)}
+              onSetTactic={onSetTactic}
               ui={ui}
             />
           )}
