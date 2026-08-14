@@ -97,15 +97,21 @@ export const signingRepBonus = ({ fromTier = 1, toTier = 1, fromStrength = 0, to
 
 // Bandas de reputación (GDD §26)
 export const REPUTATION_BANDS = [
-  { min: 0, max: 20, label: 'Desconocido', desc: 'Clubes Tier 1 y proyectos modestos' },
-  { min: 21, max: 40, label: 'Prometedor', desc: 'Clubes Tier 1 y Tier 2 de clase C/B' },
-  { min: 41, max: 60, label: 'Consolidado', desc: 'Tier 2 y Tier 3 de clase B' },
-  { min: 61, max: 70, label: 'Reconocido', desc: 'Clase A media y Tier 3' },
-  { min: 71, max: 100, label: 'Élite mundial', desc: 'Clase A y gigantes Tier 4' }
+  { min: 0, max: 20, nextMin: 20, label: 'Desconocido', desc: 'Clubes Tier 1 y proyectos modestos' },
+  { min: 20, max: 40, nextMin: 40, label: 'Prometedor', desc: 'Clubes Tier 1 y Tier 2 de clase C/B' },
+  { min: 40, max: 60, nextMin: 60, label: 'Consolidado', desc: 'Tier 2 y Tier 3 de clase B' },
+  { min: 60, max: 70, nextMin: 70, label: 'Reconocido', desc: 'Clase A media y Tier 3' },
+  { min: 70, max: 100, nextMin: 100, label: 'Élite mundial', desc: 'Clase A y gigantes Tier 4' }
 ];
 
-export const repBand = (rep) =>
-  REPUTATION_BANDS.find(b => rep >= b.min && rep <= b.max) || REPUTATION_BANDS[0];
+export const repBand = (rep: number = 0) => {
+  const r = typeof rep === 'number' ? rep : 0;
+  if (r >= 70) return REPUTATION_BANDS[4];
+  if (r >= 60) return REPUTATION_BANDS[3];
+  if (r >= 40) return REPUTATION_BANDS[2];
+  if (r >= 20) return REPUTATION_BANDS[1];
+  return REPUTATION_BANDS[0];
+};
 
 export const clampRep = (v) => Math.max(0, Math.min(100, Math.round(v * 10) / 10));
 
@@ -1413,6 +1419,30 @@ export const calculateCurrentSeasonWeek = (matchdaysPlayed = 0, completedOfficeW
     officeInfo: null,
     totalWeeks
   };
+};
+
+export const getChampionsScheduledWeeks = (totalLeagueMatchdays = 38) => {
+  // En un calendario FIFA / PES estándar de ~44 semanas:
+  // - Fase de grupos: 6 jornadas repartidas en otoño (Semanas 4, 7, 10, 13, 16, 19)
+  // - Octavos Ida y Vuelta: Semanas 25 y 28 (febrero/marzo)
+  // - Cuartos Ida y Vuelta: Semanas 32 y 34 (abril)
+  // - Semifinales Ida y Vuelta: Semanas 37 y 39 (mayo)
+  // - Gran Final: Semana 43 (cierre de temporada)
+  return [
+    { clRoundIdx: 0, phaseKey: 'groups_1', label: 'Champions · Grupos J1', shortLabel: 'UCL J1', defaultWeek: 4 },
+    { clRoundIdx: 1, phaseKey: 'groups_2', label: 'Champions · Grupos J2', shortLabel: 'UCL J2', defaultWeek: 7 },
+    { clRoundIdx: 2, phaseKey: 'groups_3', label: 'Champions · Grupos J3', shortLabel: 'UCL J3', defaultWeek: 10 },
+    { clRoundIdx: 3, phaseKey: 'groups_4', label: 'Champions · Grupos J4', shortLabel: 'UCL J4', defaultWeek: 13 },
+    { clRoundIdx: 4, phaseKey: 'groups_5', label: 'Champions · Grupos J5', shortLabel: 'UCL J5', defaultWeek: 16 },
+    { clRoundIdx: 5, phaseKey: 'groups_6', label: 'Champions · Grupos J6', shortLabel: 'UCL J6', defaultWeek: 19 },
+    { clRoundIdx: 6, phaseKey: 'Octavos_leg1', label: 'Champions · Octavos (Ida)', shortLabel: 'UCL 1/8 Ida', defaultWeek: 25 },
+    { clRoundIdx: 7, phaseKey: 'Octavos_leg2', label: 'Champions · Octavos (Vuelta)', shortLabel: 'UCL 1/8 Vta', defaultWeek: 28 },
+    { clRoundIdx: 8, phaseKey: 'Cuartos_leg1', label: 'Champions · Cuartos (Ida)', shortLabel: 'UCL 1/4 Ida', defaultWeek: 32 },
+    { clRoundIdx: 9, phaseKey: 'Cuartos_leg2', label: 'Champions · Cuartos (Vuelta)', shortLabel: 'UCL 1/4 Vta', defaultWeek: 34 },
+    { clRoundIdx: 10, phaseKey: 'Semis_leg1', label: 'Champions · Semis (Ida)', shortLabel: 'UCL Semis Ida', defaultWeek: 37 },
+    { clRoundIdx: 11, phaseKey: 'Semis_leg2', label: 'Champions · Semis (Vuelta)', shortLabel: 'UCL Semis Vta', defaultWeek: 39 },
+    { clRoundIdx: 12, phaseKey: 'Final', label: 'Champions · Gran Final', shortLabel: 'UCL Final', defaultWeek: 43 }
+  ];
 };
 
 export const DEFAULT_CAREER = {
