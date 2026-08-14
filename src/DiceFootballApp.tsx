@@ -2470,6 +2470,7 @@ function DiceFootballApp() {
 
   const activeComp = comps[activeCompId];
   const updateActiveComp = (newData) => setComps(prev => ({ ...prev, [activeCompId]: { ...prev[activeCompId], ...newData } }));
+  const updateCompById = (cId: string, newData: any) => setComps(prev => ({ ...prev, [cId]: { ...prev[cId], ...newData } }));
 
   // ===== TEMPORADA GLOBAL / JORNADA GLOBAL =====
   const [seasonState, setSeasonState] = useState(() => {
@@ -2645,9 +2646,31 @@ function DiceFootballApp() {
 
   const startMatch = (homeId, awayId, isDiv2Context) => {
     const sourceTeams = isDiv2Context ? activeComp.teams2 : activeComp.teams;
-    const home = sourceTeams.find(t => t.id === homeId);
-    const away = sourceTeams.find(t => t.id === awayId);
+    let home = sourceTeams.find(t => t.id === homeId);
+    let away = sourceTeams.find(t => t.id === awayId);
     if (!home || !away) return;
+
+    if (career?.active && careerTeam) {
+      const base = {
+        att: Math.max(career.baseDist?.att || 1, careerTeam.att || 1),
+        opp: Math.max(career.baseDist?.opp || 1, careerTeam.opp || 1),
+        def: Math.max(career.baseDist?.def || 1, careerTeam.def || 1)
+      };
+      const injury = career.activeInjury && career.activeInjury.matchday === careerMd ? career.activeInjury : null;
+      let dist = career.tactic ? { ...career.tactic } : { ...base };
+      if (injury) {
+        dist = {
+          ...dist,
+          [injury.attr]: Math.max(1, (dist[injury.attr] || base[injury.attr] || 1) - (injury.penalty || 1))
+        };
+      }
+      if (home.id === career.teamId || home.name === careerTeam.name) {
+        home = { ...home, att: dist.att, opp: dist.opp, def: dist.def };
+      }
+      if (away.id === career.teamId || away.name === careerTeam.name) {
+        away = { ...away, att: dist.att, opp: dist.opp, def: dist.def };
+      }
+    }
 
     const isVuelta = activeCompId === 'C1' && activeComp.matchday % 2 !== 0 && activeComp.phase !== 'Final' && activeComp.phase !== 'groups';
     let aggregate = null;
@@ -2758,7 +2781,29 @@ function DiceFootballApp() {
     if (matchday >= schedule.length) return null;
     const currentRound = Array.isArray(schedule) ? schedule[matchday] : [];
     const results = currentRound.map((m: any) => {
-      const h = teams.find((t: any) => t.id === m.homeId); const a = teams.find((t: any) => t.id === m.awayId);
+      let h = teams.find((t: any) => t.id === m.homeId);
+      let a = teams.find((t: any) => t.id === m.awayId);
+      if (career?.active && careerTeam) {
+        const base = {
+          att: Math.max(career.baseDist?.att || 1, careerTeam.att || 1),
+          opp: Math.max(career.baseDist?.opp || 1, careerTeam.opp || 1),
+          def: Math.max(career.baseDist?.def || 1, careerTeam.def || 1)
+        };
+        const injury = career.activeInjury && career.activeInjury.matchday === matchday ? career.activeInjury : null;
+        let dist = career.tactic ? { ...career.tactic } : { ...base };
+        if (injury) {
+          dist = {
+            ...dist,
+            [injury.attr]: Math.max(1, (dist[injury.attr] || base[injury.attr] || 1) - (injury.penalty || 1))
+          };
+        }
+        if (h && (h.id === career.teamId || h.name === careerTeam.name)) {
+          h = { ...h, att: dist.att, opp: dist.opp, def: dist.def };
+        }
+        if (a && (a.id === career.teamId || a.name === careerTeam.name)) {
+          a = { ...a, att: dist.att, opp: dist.opp, def: dist.def };
+        }
+      }
       let sh = 0, sa = 0;
       for(let i=0; i<(h?.opp||0); i++) if(Math.floor(Math.random()*6)+1 <= (h?.att||0) && Math.floor(Math.random()*6)+1 > (a?.def||0)) sh++;
       for(let i=0; i<(a?.opp||0); i++) if(Math.floor(Math.random()*6)+1 <= (a?.att||0) && Math.floor(Math.random()*6)+1 > (h?.def||0)) sa++;
@@ -2894,16 +2939,16 @@ function DiceFootballApp() {
     if (!career.active || !career.teamId || !careerTeam) return;
 
     // Estadísticas base auténticas del club del usuario (originales + mejoras de PE aplicadas)
-    const base = career.baseDist || {
-      att: careerTeam.att || 1,
-      opp: careerTeam.opp || 1,
-      def: careerTeam.def || 1
+    const base = {
+      att: Math.max(career.baseDist?.att || 1, careerTeam.att || 1),
+      opp: Math.max(career.baseDist?.opp || 1, careerTeam.opp || 1),
+      def: Math.max(career.baseDist?.def || 1, careerTeam.def || 1)
     };
 
     const hasValidInjury = career.activeInjury && career.activeInjury.matchday === careerMd;
 
-    // Si no hay lesión activa en esta jornada y las stats en comps difieren de baseDist, restaurar el equipo del usuario
-    if (!hasValidInjury && (careerTeam.att !== base.att || careerTeam.opp !== base.opp || careerTeam.def !== base.def)) {
+    // Si las stats en comps difieren de base (mejoras de PE), sincronizar comps
+    if (careerTeam.att !== base.att || careerTeam.opp !== base.opp || careerTeam.def !== base.def) {
       setComps(prev => {
         const comp = prev[career.compId];
         if (!comp) return prev;
@@ -2919,18 +2964,13 @@ function DiceFootballApp() {
       });
     }
 
-    if (!career.baseDist || (career.activeInjury && !hasValidInjury)) {
+    if (!career.baseDist || (career.activeInjury && !hasValidInjury) || career.baseDist.att !== base.att || career.baseDist.opp !== base.opp || career.baseDist.def !== base.def) {
       setCareer(c => {
-        const fixedBase = c.baseDist || {
-          att: careerTeam.att || 1,
-          opp: careerTeam.opp || 1,
-          def: careerTeam.def || 1
-        };
         const validInjury = c.activeInjury && c.activeInjury.matchday === careerMd;
         return {
           ...c,
-          baseDist: fixedBase,
-          tactic: validInjury ? c.tactic : fixedBase,
+          baseDist: base,
+          tactic: c.tactic || base,
           activeInjury: validInjury ? c.activeInjury : null
         };
       });
@@ -3098,11 +3138,6 @@ function DiceFootballApp() {
 
       setCareer(c => {
         const base = c.baseDist || { att: careerTeam.att, opp: careerTeam.opp, def: careerTeam.def };
-        const tempTactic = {
-          ...base,
-          [attr]: Math.max(1, (base[attr] || 1) - 1)
-        };
-
         return {
           ...c,
           trainedMatchday: careerMd,
@@ -3115,7 +3150,7 @@ function DiceFootballApp() {
           // Se activa el escudo de inmunidad médica por 3 jornadas completas
           medicalImmunityWeeks: 3,
           immunityActivatedMatchday: careerMd,
-          tactic: tempTactic,
+          tactic: c.tactic || base,
           lastTrainingResult: drillFeedback
         };
       });
@@ -3144,14 +3179,14 @@ function DiceFootballApp() {
   // Empieza el partido del técnico con su distribución táctica elegida
   const startCareerMatch = () => {
     if (!careerFixture || !careerTeam || !careerRival) return;
-    const base = career.baseDist || {
-      att: careerTeam.att,
-      opp: careerTeam.opp,
-      def: careerTeam.def
+    const base = {
+      att: Math.max(career.baseDist?.att || 1, careerTeam.att || 1),
+      opp: Math.max(career.baseDist?.opp || 1, careerTeam.opp || 1),
+      def: Math.max(career.baseDist?.def || 1, careerTeam.def || 1)
     };
     const injury = career.activeInjury && career.activeInjury.matchday === careerMd ? career.activeInjury : null;
 
-    let dist = career.tactic || base;
+    let dist = career.tactic ? { ...career.tactic } : { ...base };
     if (injury) {
       dist = {
         ...dist,
@@ -3193,10 +3228,10 @@ function DiceFootballApp() {
     let posAfter = posBefore;
 
     // Estadísticas base auténticas del club del usuario (originales + mejoras de PE)
-    const cleanBase = career.baseDist || {
-      att: careerTeam.att,
-      opp: careerTeam.opp,
-      def: careerTeam.def
+    const cleanBase = {
+      att: Math.max(career.baseDist?.att || 1, careerTeam.att || 1),
+      opp: Math.max(career.baseDist?.opp || 1, careerTeam.opp || 1),
+      def: Math.max(career.baseDist?.def || 1, careerTeam.def || 1)
     };
 
     setComps(prev => {
@@ -3302,9 +3337,9 @@ function DiceFootballApp() {
 
       // Resolución de postulación activa (2 semanas a ciegas)
       let updatedActiveApp = c.activeApplication;
-      let newOffers = c.offers || [];
       let updatedAppHistory = c.applicationHistory || [];
       let appResolutionModal = null;
+      let newOffer = null;
 
       if (updatedActiveApp && updatedActiveApp.status === 'review') {
         const remaining = (updatedActiveApp.weeksRemaining ?? 2) - 1;
@@ -3324,7 +3359,7 @@ function DiceFootballApp() {
           });
 
           if (evalRes.accepted) {
-            const newOffer = {
+            newOffer = {
               id: `${seasonState.season || 1}-${updatedActiveApp.compId}-${updatedActiveApp.div}-${updatedActiveApp.teamId}`,
               season: seasonState.season || 1,
               compId: updatedActiveApp.compId,
@@ -3341,7 +3376,8 @@ function DiceFootballApp() {
               profile: updatedActiveApp.tier >= 4 ? 'Gigante de Primera' : updatedActiveApp.tier === 3 ? 'Top 6 / Europa' : 'Proyecto Deportivo',
               seasons: CONTRACT_SEASONS,
               reason: 'Candidatura formal aceptada por la junta directiva tras 2 semanas de evaluación.',
-              fromApplication: true
+              fromApplication: true,
+              weeksRemaining: 2
             };
             updatedAppHistory = [
               {
@@ -3403,13 +3439,15 @@ function DiceFootballApp() {
         }
       }
 
-      // Caducidad de ofertas en el buzón: las que se enviaron por "Decidir más tarde" solo están disponibles 2 semanas
-      const prunedOffers = (newOffers || []).map(o => {
-        if (o.weeksRemaining !== undefined && o.weeksRemaining !== null) {
-          return { ...o, weeksRemaining: o.weeksRemaining - 1 };
-        }
-        return o;
-      }).filter(o => o.weeksRemaining === undefined || o.weeksRemaining === null || o.weeksRemaining > 0);
+      // Caducidad de ofertas en el buzón: solo se quedan por 2 semanas y luego se limpia el buzón
+      const prunedOffers = (c.offers || []).map(o => {
+        const currentWeeks = typeof o.weeksRemaining === 'number' ? o.weeksRemaining : 2;
+        return { ...o, weeksRemaining: currentWeeks - 1 };
+      }).filter(o => o.weeksRemaining > 0);
+
+      const finalOffers = newOffer
+        ? [newOffer, ...prunedOffers.filter(o => o.id !== newOffer.id)]
+        : prunedOffers;
 
       // Si en esta misma jornada se produjo lesión, se activan 3 semanas de inmunidad para las siguientes jornadas.
       // Si ya venía de antes, se consume 1 semana de protección.
@@ -3434,7 +3472,7 @@ function DiceFootballApp() {
         lastSimulationFeedback: simFeedback,
         stats: newStats,
         activeApplication: updatedActiveApp,
-        offers: prunedOffers,
+        offers: finalOffers,
         applicationHistory: updatedAppHistory,
         pendingAppResolutionModal: appResolutionModal || c.pendingAppResolutionModal,
         seasonLog: [
@@ -3451,31 +3489,36 @@ function DiceFootballApp() {
   // Resuelve la jornada tras jugar el partido con dados
   const finishCareerMatchday = () => {
     if (!matchState) return;
+    if (matchState.careerChampionsMatch) {
+      finishCareerChampionsMatch(matchState.scoreH, matchState.scoreA, matchState.penalties);
+      return;
+    }
     if (!careerFixture) return;
     applyCareerMatchday(matchState.scoreH, matchState.scoreA);
   };
 
   // Ejecuta el partido simulado con dados y aplica la jornada
   const executeCareerSimulatedMatch = (
-    effectiveTeam: any,
+    injuryAttr: 'att' | 'opp' | 'def' | null,
     trainingFeedback: any,
     extraPeGained: number,
     nextImmunityWeeks: number | null,
     injuryOccurredInSim: boolean
   ) => {
     if (!careerFixture || !careerTeam || !careerRival) return;
-    const baseTeamStats = career.baseDist || {
-      att: careerTeam.att,
-      opp: careerTeam.opp,
-      def: careerTeam.def
+    const baseTeamStats = {
+      att: Math.max(career.baseDist?.att || 1, careerTeam.att || 1),
+      opp: Math.max(career.baseDist?.opp || 1, careerTeam.opp || 1),
+      def: Math.max(career.baseDist?.def || 1, careerTeam.def || 1)
     };
 
-    const dist = career.tactic || career.baseDist || baseTeamStats;
-    const actualAtt = Math.min(dist.att || effectiveTeam.att, effectiveTeam.att);
-    const actualOpp = Math.min(dist.opp || effectiveTeam.opp, effectiveTeam.opp);
-    const actualDef = Math.min(dist.def || effectiveTeam.def, effectiveTeam.def);
+    const tactic = career.tactic ? { ...career.tactic } : { ...baseTeamStats };
+    let finalStats = { ...tactic };
+    if (injuryAttr) {
+      finalStats[injuryAttr] = Math.max(1, (finalStats[injuryAttr] || baseTeamStats[injuryAttr] || 1) - 1);
+    }
 
-    const mine = { ...effectiveTeam, att: actualAtt, opp: actualOpp, def: actualDef };
+    const mine = { ...careerTeam, att: finalStats.att, opp: finalStats.opp, def: finalStats.def };
     const home = careerIsHome ? mine : careerRival;
     const away = careerIsHome ? careerRival : mine;
     let sh = 0, sa = 0;
@@ -3490,17 +3533,10 @@ function DiceFootballApp() {
     if (!simulationInjuryAlert || !careerFixture || !careerTeam || !careerRival) return;
     const { affectedAttr, attrLabel, physioCost } = simulationInjuryAlert;
 
-    const baseTeamStats = career.baseDist || {
-      att: careerTeam.att,
-      opp: careerTeam.opp,
-      def: careerTeam.def
-    };
-    let effectiveTeam = { ...careerTeam, ...baseTeamStats };
     let trainingFeedback: any = null;
     let extraPeGained = 0;
 
     if (option === 'accept_injury') {
-      effectiveTeam[affectedAttr] = Math.max(1, (effectiveTeam[affectedAttr] || 1) - 1);
       trainingFeedback = {
         simulated: true,
         die: 6,
@@ -3514,7 +3550,7 @@ function DiceFootballApp() {
         message: `Baja médica aceptada: -1 ${attrLabel} en este partido simulado. Alta médica automática tras el encuentro (+3 sem. Inmunidad Médica).`
       };
       setSimulationInjuryAlert(null);
-      executeCareerSimulatedMatch(effectiveTeam, trainingFeedback, 0, 3, true);
+      executeCareerSimulatedMatch(affectedAttr, trainingFeedback, 0, 3, true);
     } else {
       // Fisioterapia de Élite: Paga PE y anula la lesión
       extraPeGained = -physioCost;
@@ -3530,7 +3566,7 @@ function DiceFootballApp() {
         message: `Fisioterapia de Élite aplicada (-${physioCost} PE). ¡Lesión cancelada, juegas al 100%! (+3 sem. Inmunidad Médica).`
       };
       setSimulationInjuryAlert(null);
-      executeCareerSimulatedMatch(effectiveTeam, trainingFeedback, extraPeGained, 3, true);
+      executeCareerSimulatedMatch(null, trainingFeedback, extraPeGained, 3, true);
     }
   };
 
@@ -3538,16 +3574,11 @@ function DiceFootballApp() {
   const simulateCareerMatchday = () => {
     if (!careerFixture || !careerTeam || !careerRival) return;
 
-    const baseTeamStats = career.baseDist || {
-      att: careerTeam.att,
-      opp: careerTeam.opp,
-      def: careerTeam.def
-    };
-    let effectiveTeam = { ...careerTeam, ...baseTeamStats };
     let trainingFeedback = null;
     let newImmunityWeeks = career.medicalImmunityWeeks || 0;
     let extraPeGained = 0;
     let injuryOccurredInSim = false;
+    let injuryAttr: 'att' | 'opp' | 'def' | null = null;
 
     // Si aún no entrenó voluntariamente en esta jornada, se simula el entrenamiento con 1D6
     if (career.trainedMatchday !== careerMd) {
@@ -3582,7 +3613,13 @@ function DiceFootballApp() {
           message: 'Sesión neutra sin incidencias ni PE extras.'
         };
       } else if (die === 6) {
-        const attrs: Array<'att' | 'opp' | 'def'> = ['att', 'opp', 'def'].filter(a => (effectiveTeam[a] || 1) > 1) as any;
+        const base = {
+          att: Math.max(career.baseDist?.att || 1, careerTeam.att || 1),
+          opp: Math.max(career.baseDist?.opp || 1, careerTeam.opp || 1),
+          def: Math.max(career.baseDist?.def || 1, careerTeam.def || 1)
+        };
+        const tactic = career.tactic ? { ...career.tactic } : { ...base };
+        const attrs: Array<'att' | 'opp' | 'def'> = ['att', 'opp', 'def'].filter(a => (tactic[a] || 1) > 1) as any;
         const affected: 'att' | 'opp' | 'def' = attrs.length > 0 ? attrs[Math.floor(Math.random() * attrs.length)] : 'att';
         const attrLabels = { att: 'Ataque (ATT)', opp: 'Ocasiones (OPP)', def: 'Defensa (DEF)' };
 
@@ -3616,13 +3653,12 @@ function DiceFootballApp() {
       trainingFeedback = career.lastTrainingResult;
       // Si ya había entrenado voluntariamente en esta jornada y hubo lesión activa
       if (career.activeInjury && career.activeInjury.matchday === careerMd) {
-        const affected = career.activeInjury.attr;
-        effectiveTeam[affected] = Math.max(1, (effectiveTeam[affected] || 1) - 1);
+        injuryAttr = career.activeInjury.attr;
         injuryOccurredInSim = true;
       }
     }
 
-    executeCareerSimulatedMatch(effectiveTeam, trainingFeedback, extraPeGained, newImmunityWeeks, injuryOccurredInSim);
+    executeCareerSimulatedMatch(injuryAttr, trainingFeedback, extraPeGained, newImmunityWeeks, injuryOccurredInSim);
   };
 
   /* ===================== CHAMPIONS EN MODO CARRERA =====================
@@ -3781,6 +3817,367 @@ function DiceFootballApp() {
       return;
     }
     finishAllLeaguesAndOpenChampions();
+  };
+
+  // Inicia un partido de UEFA Champions League para el equipo del modo carrera con dados en directo
+  const startCareerChampionsMatch = () => {
+    let clComp = comps['C1'];
+    if (!clComp?.teams?.length) {
+      finishAllLeaguesAndOpenChampions();
+      clComp = comps['C1'];
+    }
+
+    if (!clComp?.teams?.length || !careerTeam) return;
+
+    const careerClTeam = clComp.teams.find(t => t.id === clComp.careerTeamId) ||
+      clComp.teams.find(t => t.name === (clComp.careerTeamName || careerTeam.name));
+    if (!careerClTeam) return;
+
+    const phase = clComp.phase || 'groups';
+    const matchday = clComp.matchday || 0;
+
+    const baseTeamStats = {
+      att: Math.max(career.baseDist?.att || 1, careerTeam.att || 1),
+      opp: Math.max(career.baseDist?.opp || 1, careerTeam.opp || 1),
+      def: Math.max(career.baseDist?.def || 1, careerTeam.def || 1)
+    };
+    const tactic = career.tactic ? { ...career.tactic } : { ...baseTeamStats };
+    let myFinalStats = { ...tactic };
+    if (career.activeInjury) {
+      const attr = career.activeInjury.attr as 'att' | 'opp' | 'def';
+      if (attr) myFinalStats[attr] = Math.max(1, (myFinalStats[attr] || 1) - 1);
+    }
+
+    if (phase === 'groups') {
+      const userGroup = clComp.groups?.find((g: any) => g.teamIds?.includes(careerClTeam.id)) || clComp.groups?.[0];
+      if (!userGroup) return;
+      const groupTeams = clComp.teams.filter((t: any) => userGroup.teamIds?.includes(t.id));
+      const rounds = generateLeagueSchedule(groupTeams, true);
+      const currentRound = rounds[matchday % 6] || [];
+      const match = currentRound.find((m: any) => m.homeId === careerClTeam.id || m.awayId === careerClTeam.id);
+      if (!match) return;
+
+      const rawHome = clComp.teams.find((t: any) => t.id === match.homeId);
+      const rawAway = clComp.teams.find((t: any) => t.id === match.awayId);
+      const isHome = match.homeId === careerClTeam.id;
+
+      const myTeamResolved = {
+        ...(isHome ? rawHome : rawAway),
+        ...myFinalStats,
+        color1: careerTeam.color1,
+        color2: careerTeam.color2,
+        isFlag: careerTeam.isFlag
+      };
+
+      const home = isHome ? myTeamResolved : rawHome;
+      const away = isHome ? rawAway : myTeamResolved;
+
+      setMatchState({
+        home,
+        away,
+        scoreH: 0,
+        scoreA: 0,
+        oppH: home.opp,
+        oppA: away.opp,
+        turn: 'H',
+        phase: 'att',
+        lastDie: null,
+        logs: [`⭐ UEFA Champions League: ${home.name} vs ${away.name}. ${userGroup.name} · Jornada ${(matchday % 6) + 1} de 6.`],
+        penalties: null,
+        finished: false,
+        careerMatch: true,
+        careerChampionsMatch: true,
+        isKnockout: false,
+        isChampions: true,
+        championsPhase: 'groups'
+      });
+      setView('careerMatch');
+    } else if (['Octavos', 'Cuartos', 'Semis', 'Final'].includes(phase)) {
+      const bracketMatches = Array.isArray(clComp.bracket?.[phase])
+        ? clComp.bracket[phase]
+        : [clComp.bracket?.[phase]].filter(Boolean);
+
+      const match = bracketMatches.find((m: any) => m && (m.hId === careerClTeam.id || m.aId === careerClTeam.id));
+      if (!match) return;
+
+      const isVuelta = matchday % 2 !== 0 && phase !== 'Final';
+      const homeId = isVuelta ? match.aId : match.hId;
+      const awayId = isVuelta ? match.hId : match.aId;
+      const rawHome = clComp.teams.find((t: any) => t.id === homeId);
+      const rawAway = clComp.teams.find((t: any) => t.id === awayId);
+      const isHome = homeId === careerClTeam.id;
+
+      const myTeamResolved = {
+        ...(isHome ? rawHome : rawAway),
+        ...myFinalStats,
+        color1: careerTeam.color1,
+        color2: careerTeam.color2,
+        isFlag: careerTeam.isFlag
+      };
+
+      const home = isHome ? myTeamResolved : rawHome;
+      const away = isHome ? rawAway : myTeamResolved;
+
+      let aggregate = null;
+      if (isVuelta && match.sh !== null && match.sa !== null) {
+        aggregate = { sh: match.sa, sa: match.sh };
+      }
+
+      setMatchState({
+        home,
+        away,
+        scoreH: 0,
+        scoreA: 0,
+        oppH: home.opp,
+        oppA: away.opp,
+        turn: 'H',
+        phase: 'att',
+        lastDie: null,
+        logs: [`⭐ UEFA Champions League · ${clPhaseLabel(phase)}${isVuelta ? ' (Vuelta)' : phase === 'Final' ? ' (Gran Final)' : ' (Ida)'}: ${home.name} vs ${away.name}.`],
+        penalties: null,
+        finished: false,
+        careerMatch: true,
+        careerChampionsMatch: true,
+        isKnockout: true,
+        isVuelta,
+        aggregate,
+        isChampions: true,
+        championsPhase: phase
+      });
+      setView('careerMatch');
+    }
+  };
+
+  // Finaliza un partido de Champions League del modo carrera, aplicando PE, reputación, logs y sincronización global
+  const finishCareerChampionsMatch = (
+    scoreH: number,
+    scoreA: number,
+    penalties: any = null,
+    simulatedTeams: { home: any; away: any } | null = null
+  ) => {
+    const clComp = comps['C1'];
+    if (!clComp || !careerTeam) {
+      setMatchState(null);
+      setView('career');
+      return;
+    }
+
+    const careerClTeam = clComp.teams.find(t => t.id === clComp.careerTeamId) ||
+      clComp.teams.find(t => t.name === (clComp.careerTeamName || careerTeam.name));
+
+    const activeHome = simulatedTeams?.home || matchState?.home;
+    const activeAway = simulatedTeams?.away || matchState?.away;
+    const isHome = activeHome?.id === careerClTeam?.id;
+    const myGf = isHome ? scoreH : scoreA;
+    const myGa = isHome ? scoreA : scoreH;
+    const result: 'W' | 'D' | 'L' = myGf > myGa ? 'W' : myGf === myGa ? 'D' : 'L';
+    const rivalName = isHome ? activeAway?.name : activeHome?.name;
+    const currentPhase = clComp.phase || 'groups';
+
+    // 1. Procesar la ronda en el torneo global C1
+    processCupRound(
+      {
+        home: activeHome,
+        away: activeAway,
+        scoreH,
+        scoreA,
+        penalties
+      },
+      'C1'
+    );
+
+    // 2. Recompensas por partido europeo
+    const peGained = result === 'W' ? (currentPhase === 'Final' ? 6 : 3) : result === 'D' ? 2 : 0;
+    const repGained = result === 'W' ? (currentPhase === 'Final' ? 2.5 : 0.8) : result === 'D' ? 0.3 : -0.1;
+
+    setCareer(c => {
+      const cleanBase = {
+        att: Math.max(c.baseDist?.att || 1, careerTeam.att || 1),
+        opp: Math.max(c.baseDist?.opp || 1, careerTeam.opp || 1),
+        def: Math.max(c.baseDist?.def || 1, careerTeam.def || 1)
+      };
+      const newRep = Math.max(0, Math.min(100, Math.round(((c.reputation || 10) + repGained) * 10) / 10));
+      const newStats = {
+        ...c.stats,
+        played: (c.stats?.played || 0) + 1,
+        wins: (c.stats?.wins || 0) + (result === 'W' ? 1 : 0),
+        draws: (c.stats?.draws || 0) + (result === 'D' ? 1 : 0),
+        losses: (c.stats?.losses || 0) + (result === 'L' ? 1 : 0),
+        gf: (c.stats?.gf || 0) + myGf,
+        ga: (c.stats?.ga || 0) + myGa
+      };
+
+      return {
+        ...c,
+        pe: Math.max(0, (c.pe || 0) + peGained),
+        reputation: newRep,
+        activeInjury: null,
+        baseDist: cleanBase,
+        tactic: cleanBase,
+        stats: newStats,
+        lastSimulationFeedback: {
+          matchday: (clComp.matchday || 0) + 1,
+          isChampions: true,
+          rivalName: rivalName || 'Rival Europeo',
+          myGf,
+          myGa,
+          result,
+          peGained,
+          repGained,
+          headline: `⭐ UEFA Champions League · ${clPhaseLabel(currentPhase)}`,
+          summary: result === 'W'
+            ? `¡Victoria europea! ${myGf}-${myGa} contra ${rivalName}. Sumas +${peGained} PE y +${repGained} reputación.`
+            : result === 'D'
+            ? `Empate ${myGf}-${myGa} contra ${rivalName}. Sumas +${peGained} PE y +${repGained} reputación.`
+            : `Derrota ${myGf}-${myGa} contra ${rivalName} en la Champions League.`
+        },
+        seasonLog: [
+          {
+            matchday: (clComp.matchday || 0) + 1,
+            isChampions: true,
+            phase: currentPhase,
+            rival: rivalName,
+            gf: myGf,
+            ga: myGa,
+            result,
+            rep: repGained,
+            pe: peGained
+          },
+          ...(c.seasonLog || [])
+        ].slice(0, 60)
+      };
+    });
+
+    setMatchState(null);
+    setView('career');
+  };
+
+  // Simulación rápida de un partido de Champions League
+  const simulateCareerChampionsMatch = () => {
+    let clComp = comps['C1'];
+    if (!clComp?.teams?.length) {
+      finishAllLeaguesAndOpenChampions();
+      clComp = comps['C1'];
+    }
+
+    if (!clComp?.teams?.length || !careerTeam) return;
+
+    const careerClTeam = clComp.teams.find(t => t.id === clComp.careerTeamId) ||
+      clComp.teams.find(t => t.name === (clComp.careerTeamName || careerTeam.name));
+    if (!careerClTeam) return;
+
+    const phase = clComp.phase || 'groups';
+    const matchday = clComp.matchday || 0;
+
+    const baseTeamStats = {
+      att: Math.max(career.baseDist?.att || 1, careerTeam.att || 1),
+      opp: Math.max(career.baseDist?.opp || 1, careerTeam.opp || 1),
+      def: Math.max(career.baseDist?.def || 1, careerTeam.def || 1)
+    };
+    const tactic = career.tactic ? { ...career.tactic } : { ...baseTeamStats };
+    let myFinalStats = { ...tactic };
+    if (career.activeInjury) {
+      const attr = career.activeInjury.attr as 'att' | 'opp' | 'def';
+      if (attr) myFinalStats[attr] = Math.max(1, (myFinalStats[attr] || 1) - 1);
+    }
+
+    let home: any = null, away: any = null;
+
+    if (phase === 'groups') {
+      const userGroup = clComp.groups?.find((g: any) => g.teamIds?.includes(careerClTeam.id)) || clComp.groups?.[0];
+      if (!userGroup) return;
+      const groupTeams = clComp.teams.filter((t: any) => userGroup.teamIds?.includes(t.id));
+      const rounds = generateLeagueSchedule(groupTeams, true);
+      const currentRound = rounds[matchday % 6] || [];
+      const match = currentRound.find((m: any) => m.homeId === careerClTeam.id || m.awayId === careerClTeam.id);
+      if (!match) return;
+
+      const rawHome = clComp.teams.find((t: any) => t.id === match.homeId);
+      const rawAway = clComp.teams.find((t: any) => t.id === match.awayId);
+      const isHome = match.homeId === careerClTeam.id;
+
+      const myTeamResolved = {
+        ...(isHome ? rawHome : rawAway),
+        ...myFinalStats,
+        color1: careerTeam.color1,
+        color2: careerTeam.color2,
+        isFlag: careerTeam.isFlag
+      };
+
+      home = isHome ? myTeamResolved : rawHome;
+      away = isHome ? rawAway : myTeamResolved;
+    } else if (['Octavos', 'Cuartos', 'Semis', 'Final'].includes(phase)) {
+      const bracketMatches = Array.isArray(clComp.bracket?.[phase])
+        ? clComp.bracket[phase]
+        : [clComp.bracket?.[phase]].filter(Boolean);
+
+      const match = bracketMatches.find((m: any) => m && (m.hId === careerClTeam.id || m.aId === careerClTeam.id));
+      if (!match) return;
+
+      const isVuelta = matchday % 2 !== 0 && phase !== 'Final';
+      const homeId = isVuelta ? match.aId : match.hId;
+      const awayId = isVuelta ? match.hId : match.aId;
+      const rawHome = clComp.teams.find((t: any) => t.id === homeId);
+      const rawAway = clComp.teams.find((t: any) => t.id === awayId);
+      const isHome = homeId === careerClTeam.id;
+
+      const myTeamResolved = {
+        ...(isHome ? rawHome : rawAway),
+        ...myFinalStats,
+        color1: careerTeam.color1,
+        color2: careerTeam.color2,
+        isFlag: careerTeam.isFlag
+      };
+
+      home = isHome ? myTeamResolved : rawHome;
+      away = isHome ? rawAway : myTeamResolved;
+    }
+
+    if (!home || !away) return;
+
+    let simH = 0, simA = 0;
+    for (let i = 0; i < (home.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (home.att || 0) && Math.floor(Math.random() * 6) + 1 > (away.def || 0)) simH++;
+    for (let i = 0; i < (away.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (away.att || 0) && Math.floor(Math.random() * 6) + 1 > (home.def || 0)) simA++;
+
+    let penalties: any = null;
+    if (phase !== 'groups') {
+      const isVuelta = matchday % 2 !== 0 && phase !== 'Final';
+      const bracketMatches = Array.isArray(clComp.bracket?.[phase])
+        ? clComp.bracket[phase]
+        : [clComp.bracket?.[phase]].filter(Boolean);
+      const match = bracketMatches.find((m: any) => m && (m.hId === home.id || m.aId === home.id || m.hId === away.id || m.aId === away.id));
+      const leg1H = match?.sh || 0;
+      const leg1A = match?.sa || 0;
+      const isDraw = phase === 'Final' ? (simH === simA) : isVuelta ? ((leg1H + simA) === (leg1A + simH)) : false;
+
+      if (isDraw) {
+        let spH = 0, spA = 0, shH = 0, shA = 0;
+        const simPen = (att: number, def: number) => (Math.floor(Math.random() * 6) + 1 <= att && Math.floor(Math.random() * 6) + 1 > def);
+        for (let i = 0; i < 5; i++) {
+          if (simPen(home.att, away.def)) spH++; shH++;
+          if (spH > spA + (5 - shA) || spA > spH + (5 - shH)) break;
+          if (simPen(away.att, home.def)) spA++; shA++;
+          if (spH > spA + (5 - shA) || spA > spH + (5 - shH)) break;
+        }
+        while (spH === spA) {
+          if (simPen(home.att, away.def)) spH++;
+          if (simPen(away.att, home.def)) spA++;
+        }
+        penalties = { scoreH: spH, scoreA: spA };
+      }
+    }
+
+    finishCareerChampionsMatch(simH, simA, penalties, { home, away });
+  };
+
+  // Simulación de todo el torneo Champions League restante
+  const simulateAllCareerChampions = () => {
+    let guard = 0;
+    while (guard++ < 20) {
+      const c1 = comps['C1'];
+      if (!c1 || c1.phase === 'Terminado' || c1.showWinner) break;
+      processCupRound(null, 'C1', true);
+    }
   };
 
 
@@ -4016,9 +4413,9 @@ function DiceFootballApp() {
       }
 
       let updatedActiveApp = c.activeApplication;
-      let newOffers = c.offers || [];
       let updatedAppHistory = c.applicationHistory || [];
       let appResolutionModal = null;
+      let newOffer = null;
 
       if (updatedActiveApp && updatedActiveApp.status === 'review') {
         const remaining = (updatedActiveApp.weeksRemaining ?? 2) - 1;
@@ -4042,7 +4439,7 @@ function DiceFootballApp() {
           });
 
           if (evalRes.accepted) {
-            const newOffer = {
+            newOffer = {
               id: `${seasonState.season || 1}-${updatedActiveApp.compId}-${updatedActiveApp.div}-${updatedActiveApp.teamId}`,
               season: seasonState.season || 1,
               compId: updatedActiveApp.compId,
@@ -4059,9 +4456,9 @@ function DiceFootballApp() {
               profile: updatedActiveApp.tier >= 4 ? 'Gigante de Primera' : updatedActiveApp.tier === 3 ? 'Top 6 / Europa' : 'Proyecto Deportivo',
               seasons: CONTRACT_SEASONS,
               reason: 'Candidatura formal aceptada por la junta directiva tras 2 semanas de evaluación.',
-              fromApplication: true
+              fromApplication: true,
+              weeksRemaining: 2
             };
-            newOffers = [newOffer, ...newOffers.filter(o => o.id !== newOffer.id)];
             updatedAppHistory = [
               {
                 id: `app-res-${Date.now()}`,
@@ -4122,11 +4519,21 @@ function DiceFootballApp() {
         }
       }
 
+      // Caducidad de ofertas en el buzón: solo se quedan por 2 semanas y luego se limpia el buzón
+      const prunedOffers = (c.offers || []).map(o => {
+        const currentWeeks = typeof o.weeksRemaining === 'number' ? o.weeksRemaining : 2;
+        return { ...o, weeksRemaining: currentWeeks - 1 };
+      }).filter(o => o.weeksRemaining > 0);
+
+      const finalOffers = newOffer
+        ? [newOffer, ...prunedOffers.filter(o => o.id !== newOffer.id)]
+        : prunedOffers;
+
       return {
         ...c,
         completedOfficeWeeks: completed,
         activeApplication: updatedActiveApp,
-        offers: newOffers,
+        offers: finalOffers,
         applicationHistory: updatedAppHistory,
         pendingAppResolutionModal: appResolutionModal || c.pendingAppResolutionModal
       };
@@ -4215,140 +4622,143 @@ function DiceFootballApp() {
 
   // Resuelve la ronda/jornada actual de una copa o mundial.
   // `ms` = resultado jugado manualmente por el usuario, o null para simular TODO.
-  const processCupRound = (ms: any) => {
-    if (!activeComp || activeComp.type === 'league') return;
-       const isAutoSim = !ms && cupAutoSim;
-       // Copas y Mundiales mantienen la lógica original sin divisiones múltiples
-       // ... Lógica reducida de torneo (C1/C2) ...
-       const results: any[] = ms
-         ? [{ hId: ms.home.id, aId: ms.away.id, sh: ms.scoreH, sa: ms.scoreA, penH: ms.penalties?.scoreH, penA: ms.penalties?.scoreA }]
-         : [];
-       if (activeComp.phase === 'groups') {
-          const isWorldCup = activeCompId === 'C2';
-          const maxMatchdays = isWorldCup ? 3 : 6;
-          activeComp.groups.forEach(group => {
-             const groupTeams = activeComp.teams.filter(t => group.teamIds.includes(t.id));
-             const currentRound = generateLeagueSchedule(groupTeams, !isWorldCup)[activeComp.matchday % maxMatchdays];
-             if (currentRound) {
-                currentRound.forEach(m => {
-                   if (!ms || (m.homeId !== activeComp.userTeamId && m.awayId !== activeComp.userTeamId)) {
-                      const h = activeComp.teams.find(t => t.id === m.homeId); const a = activeComp.teams.find(t => t.id === m.awayId);
-                      let sh = 0, sa = 0;
-                      for(let i=0; i<h.opp; i++) if(Math.floor(Math.random()*6)+1 <= h.att && Math.floor(Math.random()*6)+1 > a.def) sh++;
-                      for(let i=0; i<a.opp; i++) if(Math.floor(Math.random()*6)+1 <= a.att && Math.floor(Math.random()*6)+1 > h.def) sa++;
-                      results.push({ hId: m.homeId, aId: m.awayId, sh, sa, penH: null, penA: null });
-                   }
-                });
-             }
-          });
-          const updatedTeams = activeComp.teams.map(t => {
-             const res = results.find(r => r.hId === t.id || r.aId === t.id);
-             if (!res) return t;
-             const isHome = res.hId === t.id;
-             const gf = isHome ? res.sh : res.sa; const ga = isHome ? res.sa : res.sh;
-             const w = gf > ga ? 1 : 0; const d = gf === ga ? 1 : 0; const l = gf < ga ? 1 : 0;
-             return { ...t, p: t.p + 1, w: t.w + w, d: t.d + d, l: t.l + l, gf: t.gf + gf, ga: t.ga + ga, pts: t.pts + (w * 3 + d) };
-          });
-          const nextMatchday = activeComp.matchday + 1;
-          const isEndOfGroups = nextMatchday >= maxMatchdays;
-          let newBracket = null;
-          if (isEndOfGroups) newBracket = generateKnockoutBrackets({ ...activeComp, teams: updatedTeams });
-           updateActiveComp({ teams: updatedTeams, history: [{ day: 'Jornada ' + nextMatchday, results }, ...activeComp.history], matchday: nextMatchday, phase: isEndOfGroups ? (newBracket.Octavos ? 'Octavos' : 'Cuartos') : 'groups', bracket: newBracket });
-
-           // Check if user's team was eliminated in group stage
-           if (isEndOfGroups) {
-             const userTeamId = activeComp.userTeamId;
-             const userGroup = activeComp.groups.find(g => g.teamIds.includes(userTeamId));
-             if (userGroup) {
-               const groupTeams = updatedTeams.filter(t => userGroup.teamIds.includes(t.id)).sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga));
-               const userPos = groupTeams.findIndex(t => t.id === userTeamId);
-               if (userPos >= 2) {
-                 if (isAutoSim) {
-                   // En "Simular Todo" no interrumpimos: adoptamos automáticamente un clasificado
-                   const qualified = activeComp.groups.flatMap(g => {
-                     const gt = updatedTeams.filter(t => g.teamIds.includes(t.id)).sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga));
-                     return gt.slice(0, 2).map(t => t.id);
-                   }).filter(id => id !== userTeamId);
-                   if (qualified.length) updateActiveComp({ userTeamId: qualified[Math.floor(Math.random() * qualified.length)] });
-                 } else {
-                   setTimeout(() => setEliminatedModal({ compId: activeCompId, phase: 'Fase de Grupos' }), 500);
-                 }
-               }
-             }
-           }
-
-       } else {
-          // Eliminatorias
-          const isChampions = activeCompId === 'C1';
-          const phase = activeComp.phase;
-          const isVuelta = isChampions && activeComp.matchday % 2 !== 0 && phase !== 'Final';
-          const newBracket = { ...activeComp.bracket };
-          const matchesToProcess = Array.isArray(newBracket[phase]) ? newBracket[phase] : [newBracket[phase]];
-          const allResults = [];
-
-          matchesToProcess.forEach(m => {
-             let sh, sa, penH, penA;
-             if (ms && m.hId === ms.home.id && m.aId === ms.away.id) { sh = ms.scoreH; sa = ms.scoreA; penH = ms.penalties?.scoreH; penA = ms.penalties?.scoreA; } 
-             else if (ms && isVuelta && m.hId === ms.away.id && m.aId === ms.home.id) { sh = ms.scoreA; sa = ms.scoreH; penH = ms.penalties?.scoreA; penA = ms.penalties?.scoreH; } 
-             else {
-                const h = activeComp.teams.find(t => t.id === (isVuelta ? m.aId : m.hId)); const a = activeComp.teams.find(t => t.id === (isVuelta ? m.hId : m.aId));
-                let simH = 0, simA = 0;
-                for(let i=0; i<h.opp; i++) if(Math.floor(Math.random()*6)+1 <= h.att && Math.floor(Math.random()*6)+1 > a.def) simH++;
-                for(let i=0; i<a.opp; i++) if(Math.floor(Math.random()*6)+1 <= a.att && Math.floor(Math.random()*6)+1 > h.def) simA++;
-                if (isVuelta) { sh = simA; sa = simH; } else { sh = simH; sa = simA; }
-                const isDraw = (isChampions && isVuelta && phase !== 'Final') ? (m.sh + sh === m.sa + sa) : (sh === sa);
-                if (isDraw && (!isChampions || isVuelta || phase === 'Final')) {
-                   let spH=0, spA=0, shH=0, shA=0;
-                   const sim = (att, def) => (Math.floor(Math.random()*6)+1 <= att && Math.floor(Math.random()*6)+1 > def);
-                   for(let i=0; i<5; i++){
-                      if(sim(h.att, a.def)) spH++; shH++;
-                      if(spH > spA + (5-shA) || spA > spH + (5-shH)) break;
-                      if(sim(a.att, h.def)) spA++; shA++;
-                      if(spH > spA + (5-shA) || spA > spH + (5-shH)) break;
-                   }
-                   while(spH===spA){ if(sim(h.att, a.def)) spH++; if(sim(a.att, h.def)) spA++; }
-                   penH = spH; penA = spA;
+  const processCupRound = (ms?: any, targetCompId?: string, isAutoSimManual?: boolean) => {
+    const cId = targetCompId || activeCompId;
+    const currentComp = comps[cId];
+    if (!currentComp || currentComp.type === 'league') return;
+    const isAutoSim = isAutoSimManual ?? (!ms && cupAutoSim);
+    // Copas y Mundiales mantienen la lógica original sin divisiones múltiples
+    const results: any[] = ms
+      ? [{ hId: ms.home.id, aId: ms.away.id, sh: ms.scoreH, sa: ms.scoreA, penH: ms.penalties?.scoreH, penA: ms.penalties?.scoreA }]
+      : [];
+    if (currentComp.phase === 'groups') {
+       const isWorldCup = cId === 'C2';
+       const maxMatchdays = isWorldCup ? 3 : 6;
+       currentComp.groups.forEach(group => {
+          const groupTeams = currentComp.teams.filter(t => group.teamIds.includes(t.id));
+          const currentRound = generateLeagueSchedule(groupTeams, !isWorldCup)[currentComp.matchday % maxMatchdays];
+          if (currentRound) {
+             currentRound.forEach(m => {
+                const isUserMatch = ms && (m.homeId === currentComp.userTeamId || m.awayId === currentComp.userTeamId || m.homeId === ms.home?.id || m.awayId === ms.home?.id);
+                if (!isUserMatch) {
+                   const h = currentComp.teams.find(t => t.id === m.homeId); const a = currentComp.teams.find(t => t.id === m.awayId);
+                   let sh = 0, sa = 0;
+                   for(let i=0; i<h.opp; i++) if(Math.floor(Math.random()*6)+1 <= h.att && Math.floor(Math.random()*6)+1 > a.def) sh++;
+                   for(let i=0; i<a.opp; i++) if(Math.floor(Math.random()*6)+1 <= a.att && Math.floor(Math.random()*6)+1 > h.def) sa++;
+                   results.push({ hId: m.homeId, aId: m.awayId, sh, sa, penH: null, penA: null });
                 }
-             }
-             if (isVuelta) { m.sh2 = sh; m.sa2 = sa; } else { m.sh = sh; m.sa = sa; }
-             if (penH !== undefined) { m.penH = penH; m.penA = penA; }
-             allResults.push(isVuelta ? { hId: m.aId, aId: m.hId, sh: sa, sa: sh, penH: penA, penA: penH } : { hId: m.hId, aId: m.aId, sh, sa, penH, penA });
-          });
-
-          let nextPhase = phase, showWinner = false;
-          if (!isChampions || isVuelta || phase === 'Final') {
-             const winners = matchesToProcess.map(m => {
-                const tH = isChampions && phase!=='Final' ? m.sh+m.sh2 : m.sh; const tA = isChampions && phase!=='Final' ? m.sa+m.sa2 : m.sa;
-                if(tH>tA) return m.hId; if(tA>tH) return m.aId; return m.penH>m.penA ? m.hId : m.aId;
              });
-             if (phase === 'Octavos') { nextPhase = 'Cuartos'; newBracket.Cuartos = Array(4).fill(0).map((_, i) => ({ id: 'C'+(i+1), hId: winners[i*2], aId: winners[i*2+1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null })); } 
-             else if (phase === 'Cuartos') { nextPhase = 'Semis'; newBracket.Semis = Array(2).fill(0).map((_, i) => ({ id: 'S'+(i+1), hId: winners[i*2], aId: winners[i*2+1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null })); } 
-             else if (phase === 'Semis') { nextPhase = 'Final'; newBracket.Final = [{ id: 'F1', hId: winners[0], aId: winners[1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null }]; } 
-             else { nextPhase = 'Terminado'; showWinner = true; }
           }
-           const updatedComp = { history: [{ day: phase + (isChampions ? (isVuelta ? ' (Vuelta)' : ' (Ida)') : ''), results: allResults }, ...activeComp.history], matchday: activeComp.matchday + 1, phase: nextPhase, bracket: newBracket, showWinner };
-           updateActiveComp(updatedComp);
-           if (showWinner) archiveCompetition(activeCompId, 1);
+       });
+       const updatedTeams = currentComp.teams.map(t => {
+          const res = results.find(r => r.hId === t.id || r.aId === t.id);
+          if (!res) return t;
+          const isHome = res.hId === t.id;
+          const gf = isHome ? res.sh : res.sa; const ga = isHome ? res.sa : res.sh;
+          const w = gf > ga ? 1 : 0; const d = gf === ga ? 1 : 0; const l = gf < ga ? 1 : 0;
+          return { ...t, p: t.p + 1, w: t.w + w, d: t.d + d, l: t.l + l, gf: t.gf + gf, ga: t.ga + ga, pts: t.pts + (w * 3 + d) };
+       });
+       const nextMatchday = currentComp.matchday + 1;
+       const isEndOfGroups = nextMatchday >= maxMatchdays;
+       let newBracket = null;
+       if (isEndOfGroups) newBracket = generateKnockoutBrackets({ ...currentComp, teams: updatedTeams });
+        const updatedComp = { teams: updatedTeams, history: [{ day: 'Jornada ' + nextMatchday, results }, ...currentComp.history], matchday: nextMatchday, phase: isEndOfGroups ? (newBracket.Octavos ? 'Octavos' : 'Cuartos') : 'groups', bracket: newBracket };
+        updateCompById(cId, updatedComp);
 
-           // Check if user's team was eliminated in knockout
-           if (!isChampions || isVuelta || phase === 'Final') {
-             const userTeamId = activeComp.userTeamId;
-             const winners = matchesToProcess.map(m => {
-               const tH = isChampions && phase!=='Final' ? m.sh+m.sh2 : m.sh; const tA = isChampions && phase!=='Final' ? m.sa+m.sa2 : m.sa;
-               if(tH>tA) return m.hId; if(tA>tH) return m.aId; return m.penH>m.penA ? m.hId : m.aId;
-             });
-             const wasInThisRound = matchesToProcess.some(m => m.hId === userTeamId || m.aId === userTeamId);
-             const userAdvanced = winners.includes(userTeamId);
-            if (wasInThisRound && !userAdvanced && !showWinner) {
-               if (isAutoSim) {
-                 const alive = winners.filter(id => id !== userTeamId);
-                 if (alive.length) updateActiveComp({ userTeamId: alive[Math.floor(Math.random() * alive.length)] });
-               } else {
-                 setTimeout(() => setEliminatedModal({ compId: activeCompId, phase }), 500);
-               }
+        // Check if user's team was eliminated in group stage (solo en vista standalone de competición)
+        if (isEndOfGroups && cId === activeCompId) {
+          const userTeamId = currentComp.userTeamId;
+          const userGroup = currentComp.groups.find(g => g.teamIds.includes(userTeamId));
+          if (userGroup) {
+            const groupTeams = updatedTeams.filter(t => userGroup.teamIds.includes(t.id)).sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga));
+            const userPos = groupTeams.findIndex(t => t.id === userTeamId);
+            if (userPos >= 2) {
+              if (isAutoSim) {
+                // En "Simular Todo" no interrumpimos: adoptamos automáticamente un clasificado
+                const qualified = currentComp.groups.flatMap(g => {
+                  const gt = updatedTeams.filter(t => g.teamIds.includes(t.id)).sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga));
+                  return gt.slice(0, 2).map(t => t.id);
+                }).filter(id => id !== userTeamId);
+                if (qualified.length) updateCompById(cId, { userTeamId: qualified[Math.floor(Math.random() * qualified.length)] });
+              } else {
+                setTimeout(() => setEliminatedModal({ compId: activeCompId, phase: 'Fase de Grupos' }), 500);
+              }
+            }
+          }
+        }
+
+    } else {
+       // Eliminatorias
+       const isChampions = cId === 'C1';
+       const phase = currentComp.phase;
+       const isVuelta = isChampions && currentComp.matchday % 2 !== 0 && phase !== 'Final';
+       const newBracket = { ...currentComp.bracket };
+       const matchesToProcess = Array.isArray(newBracket[phase]) ? newBracket[phase] : [newBracket[phase]];
+       const allResults = [];
+
+       matchesToProcess.forEach(m => {
+          let sh, sa, penH, penA;
+          if (ms && m.hId === ms.home.id && m.aId === ms.away.id) { sh = ms.scoreH; sa = ms.scoreA; penH = ms.penalties?.scoreH; penA = ms.penalties?.scoreA; } 
+          else if (ms && isVuelta && m.hId === ms.away.id && m.aId === ms.home.id) { sh = ms.scoreA; sa = ms.scoreH; penH = ms.penalties?.scoreA; penA = ms.penalties?.scoreH; } 
+          else {
+             const h = currentComp.teams.find(t => t.id === (isVuelta ? m.aId : m.hId)); const a = currentComp.teams.find(t => t.id === (isVuelta ? m.hId : m.aId));
+             let simH = 0, simA = 0;
+             for(let i=0; i<h.opp; i++) if(Math.floor(Math.random()*6)+1 <= h.att && Math.floor(Math.random()*6)+1 > a.def) simH++;
+             for(let i=0; i<a.opp; i++) if(Math.floor(Math.random()*6)+1 <= a.att && Math.floor(Math.random()*6)+1 > h.def) simA++;
+             if (isVuelta) { sh = simA; sa = simH; } else { sh = simH; sa = simA; }
+             const isDraw = (isChampions && isVuelta && phase !== 'Final') ? (m.sh + sh === m.sa + sa) : (sh === sa);
+             if (isDraw && (!isChampions || isVuelta || phase === 'Final')) {
+                let spH=0, spA=0, shH=0, shA=0;
+                const sim = (att, def) => (Math.floor(Math.random()*6)+1 <= att && Math.floor(Math.random()*6)+1 > def);
+                for(let i=0; i<5; i++){
+                   if(sim(h.att, a.def)) spH++; shH++;
+                   if(spH > spA + (5-shA) || spA > spH + (5-shH)) break;
+                   if(sim(a.att, h.def)) spA++; shA++;
+                   if(spH > spA + (5-shA) || spA > spH + (5-shH)) break;
+                }
+                while(spH===spA){ if(sim(h.att, a.def)) spH++; if(sim(a.att, h.def)) spA++; }
+                penH = spH; penA = spA;
              }
-           }
+          }
+          if (isVuelta) { m.sh2 = sh; m.sa2 = sa; } else { m.sh = sh; m.sa = sa; }
+          if (penH !== undefined) { m.penH = penH; m.penA = penA; }
+          allResults.push(isVuelta ? { hId: m.aId, aId: m.hId, sh: sa, sa: sh, penH: penA, penA: penH } : { hId: m.hId, aId: m.aId, sh, sa, penH, penA });
+       });
+
+       let nextPhase = phase, showWinner = false;
+       if (!isChampions || isVuelta || phase === 'Final') {
+          const winners = matchesToProcess.map(m => {
+             const tH = isChampions && phase!=='Final' ? m.sh+m.sh2 : m.sh; const tA = isChampions && phase!=='Final' ? m.sa+m.sa2 : m.sa;
+             if(tH>tA) return m.hId; if(tA>tH) return m.aId; return m.penH>m.penA ? m.hId : m.aId;
+          });
+          if (phase === 'Octavos') { nextPhase = 'Cuartos'; newBracket.Cuartos = Array(4).fill(0).map((_, i) => ({ id: 'C'+(i+1), hId: winners[i*2], aId: winners[i*2+1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null })); } 
+          else if (phase === 'Cuartos') { nextPhase = 'Semis'; newBracket.Semis = Array(2).fill(0).map((_, i) => ({ id: 'S'+(i+1), hId: winners[i*2], aId: winners[i*2+1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null })); } 
+          else if (phase === 'Semis') { nextPhase = 'Final'; newBracket.Final = [{ id: 'F1', hId: winners[0], aId: winners[1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null }]; } 
+          else { nextPhase = 'Terminado'; showWinner = true; }
        }
+        const updatedComp = { history: [{ day: phase + (isChampions ? (isVuelta ? ' (Vuelta)' : ' (Ida)') : ''), results: allResults }, ...currentComp.history], matchday: currentComp.matchday + 1, phase: nextPhase, bracket: newBracket, showWinner };
+        updateCompById(cId, updatedComp);
+        if (showWinner) archiveCompetition(cId, 1);
+
+        // Check if user's team was eliminated in knockout (solo en vista standalone)
+        if ((!isChampions || isVuelta || phase === 'Final') && cId === activeCompId) {
+          const userTeamId = currentComp.userTeamId;
+          const winners = matchesToProcess.map(m => {
+            const tH = isChampions && phase!=='Final' ? m.sh+m.sh2 : m.sh; const tA = isChampions && phase!=='Final' ? m.sa+m.sa2 : m.sa;
+            if(tH>tA) return m.hId; if(tA>tH) return m.aId; return m.penH>m.penA ? m.hId : m.aId;
+          });
+          const wasInThisRound = matchesToProcess.some(m => m.hId === userTeamId || m.aId === userTeamId);
+          const userAdvanced = winners.includes(userTeamId);
+         if (wasInThisRound && !userAdvanced && !showWinner) {
+            if (isAutoSim) {
+              const alive = winners.filter(id => id !== userTeamId);
+              if (alive.length) updateCompById(cId, { userTeamId: alive[Math.floor(Math.random() * alive.length)] });
+            } else {
+              setTimeout(() => setEliminatedModal({ compId: activeCompId, phase }), 500);
+            }
+          }
+        }
+    }
   };
 
   const processMatchday = () => {
@@ -5928,6 +6338,10 @@ function DiceFootballApp() {
                 championsFinished={championsFinished}
                 onNewSeason={() => { startNewGlobalSeason(); setView('career'); }}
                 clInfo={careerClInfo}
+                clComp={comps['C1']}
+                onPlayChampionsMatch={startCareerChampionsMatch}
+                onSimulateChampionsMatch={simulateCareerChampionsMatch}
+                onSimulateAllChampions={simulateAllCareerChampions}
                 schedule={careerSchedule}
                 onOpenChampions={openCareerChampions}
                 onAcceptOffer={acceptCareerOffer}
