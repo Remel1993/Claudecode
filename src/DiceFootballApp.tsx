@@ -1000,7 +1000,7 @@ const registerSeasonSummary = (comp: any, currentSeason: number) => {
 
 const ChampionsHistoryModal = ({ championsHistory = [], onClose, title = 'Palmarés', compId = null, div = 1, showTopWinners = false }: { championsHistory?: ChampionRecord[]; onClose?: () => void; title?: string; compId?: string | null; div?: number; showTopWinners?: boolean }) => {
   const [tab, setTab] = useState<'history' | 'winners'>('history');
-  const canShowWinners = showTopWinners && div === 1 && !!compId;
+  const canShowWinners = (showTopWinners || !!compId) && !!compId;
 
   return (
   <div className='fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-3' onClick={onClose}>
@@ -1888,6 +1888,18 @@ const PenaltyDots = ({ history }) => {
 
 const ArchiveView = ({ setView, archive, selectedArchiveEntry, setSelectedArchiveEntry }) => {
   const [palmaresModal, setPalmaresModal] = useState<null | { title: string; compId: string; div: number }>(null);
+  const [archiveLeagueDiv, setArchiveLeagueDiv] = useState<1 | 2>(1);
+
+  const nationalLeagues = [
+    { id: 'L1', name: 'España', fullName: 'Liga Española', flag: '🇪🇸' },
+    { id: 'L2', name: 'Italia', fullName: 'Liga Italiana', flag: '🇮🇹' },
+    { id: 'L3', name: 'Inglaterra', fullName: 'Liga Inglesa', flag: '🇬🇧' },
+    { id: 'L4', name: 'Alemania', fullName: 'Liga Alemana', flag: '🇩🇪' },
+    { id: 'L5', name: 'Países Bajos', fullName: 'Liga Holandesa', flag: '🇳🇱' },
+    { id: 'L6', name: 'Francia', fullName: 'Liga Francesa', flag: '🇫🇷' },
+    { id: 'L7', name: 'Miscelánea / Portugal', fullName: 'Liga Miscelánea', flag: '🇵🇹' }
+  ];
+
   return (
   <div className='flex-grow flex flex-col'>
 
@@ -1898,25 +1910,66 @@ const ArchiveView = ({ setView, archive, selectedArchiveEntry, setSelectedArchiv
 
     <div className='px-4 pb-8'>
       {!selectedArchiveEntry ? (
-        <div className='space-y-4'>
-          <p className="text-[10px] text-slate-300 font-bold uppercase italic tracking-widest text-center mb-4 drop-shadow-md">Máximos Ganadores</p>
-          <div className='grid grid-cols-2 gap-2 mb-6'>
+        <div className='space-y-6'>
+          {/* PALMARES Y ESTRELLAS POR COMPETICIÓN */}
+          <div className='bg-slate-900/50 backdrop-blur-md rounded-3xl border border-amber-400/20 p-4 shadow-xl'>
+            <div className='flex items-center justify-between mb-3'>
+              <div className='flex items-center gap-2'>
+                <Trophy size={16} className='text-amber-400' />
+                <h3 className='text-xs font-black text-amber-300 uppercase tracking-wider italic'>Palmarés y Estrellas Históricas</h3>
+              </div>
+              <div className='flex bg-slate-950/80 rounded-xl p-0.5 border border-white/10'>
+                <button
+                  onClick={() => setArchiveLeagueDiv(1)}
+                  className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all ${archiveLeagueDiv === 1 ? 'bg-amber-500 text-slate-950 font-black shadow-md' : 'text-slate-400 hover:text-white'}`}
+                >
+                  1ª Div
+                </button>
+                <button
+                  onClick={() => setArchiveLeagueDiv(2)}
+                  className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all ${archiveLeagueDiv === 2 ? 'bg-emerald-500 text-slate-950 font-black shadow-md' : 'text-slate-400 hover:text-white'}`}
+                >
+                  2ª Div
+                </button>
+              </div>
+            </div>
 
-                        <button onClick={() => setPalmaresModal({ title: 'Palmarés Champions', compId: 'C1', div: 1 })} className='flex flex-col items-center gap-1.5 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-2 py-3 text-center active:scale-95 transition-all'>
-              <Trophy size={18} className='text-amber-400' />
-              <span className='text-[8px] font-black uppercase italic tracking-wider text-amber-200'>Champions</span>
-            </button>
-            <button onClick={() => setPalmaresModal({ title: 'Palmarés Copa del Mundo', compId: 'C2', div: 1 })} className='flex flex-col items-center gap-1.5 rounded-2xl border border-sky-400/30 bg-sky-500/10 px-2 py-3 text-center active:scale-95 transition-all'>
-              <Globe size={18} className='text-sky-400' />
-              <span className='text-[8px] font-black uppercase italic tracking-wider text-sky-200'>Copa del Mundo</span>
-            </button>
+            {/* Torneos Internacionales */}
+            <div className='grid grid-cols-2 gap-2 mb-3'>
+              <button onClick={() => setPalmaresModal({ title: 'Palmarés Champions League', compId: 'C1', div: 1 })} className='flex items-center justify-center gap-2 rounded-2xl border border-amber-400/30 bg-gradient-to-r from-amber-500/20 to-yellow-500/10 px-3 py-2.5 text-center active:scale-95 transition-all shadow-md hover:border-amber-400/60'>
+                <Trophy size={16} className='text-amber-400 shrink-0' />
+                <span className='text-[9px] font-black uppercase italic tracking-wider text-amber-200'>Champions League</span>
+              </button>
+              <button onClick={() => setPalmaresModal({ title: 'Palmarés Copa del Mundo', compId: 'C2', div: 1 })} className='flex items-center justify-center gap-2 rounded-2xl border border-sky-400/30 bg-gradient-to-r from-sky-500/20 to-blue-500/10 px-3 py-2.5 text-center active:scale-95 transition-all shadow-md hover:border-sky-400/60'>
+                <Globe size={16} className='text-sky-400 shrink-0' />
+                <span className='text-[9px] font-black uppercase italic tracking-wider text-sky-200'>Copa del Mundo</span>
+              </button>
+            </div>
 
+            {/* Ligas Nacionales */}
+            <div className='grid grid-cols-2 sm:grid-cols-3 gap-2'>
+              {nationalLeagues.map(l => (
+                <button
+                  key={l.id}
+                  onClick={() => setPalmaresModal({ title: `Palmarés ${l.fullName} (${archiveLeagueDiv}ª Div)`, compId: l.id, div: archiveLeagueDiv })}
+                  className='flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/60 hover:bg-amber-500/10 hover:border-amber-400/30 px-2.5 py-2 text-left active:scale-95 transition-all'
+                >
+                  <span className='text-sm shrink-0'>{l.flag}</span>
+                  <div className='min-w-0 flex-grow'>
+                    <p className='text-[9px] font-black uppercase italic truncate text-slate-200'>{l.name}</p>
+                    <p className='text-[7px] font-bold text-amber-400/80 uppercase tracking-widest'>{archiveLeagueDiv}ª División</p>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
-          <p className="text-[10px] text-slate-300 font-bold uppercase italic tracking-widest text-center mb-6 drop-shadow-md">Últimos 10 Registros</p>
+
+          <p className="text-[10px] text-slate-300 font-bold uppercase italic tracking-widest text-center drop-shadow-md">Últimos Campeonatos Registrados</p>
           {archive.length === 0 ? (
-            <div className='text-center py-20 bg-slate-900/30 backdrop-blur-md rounded-3xl border border-white/10 shadow-xl'>
-              <History size={48} className='mx-auto mb-4 text-slate-400' />
+            <div className='text-center py-16 bg-slate-900/30 backdrop-blur-md rounded-3xl border border-white/10 shadow-xl'>
+              <History size={40} className='mx-auto mb-3 text-slate-400' />
               <p className='text-xs font-black uppercase italic text-slate-300'>No hay registros guardados</p>
+              <p className='text-[9px] font-bold text-slate-500 mt-1'>Los campeones de ligas y Champions aparecerán aquí automáticamente.</p>
             </div>
           ) : (
             archive.map((entry, idx) => (
@@ -2564,6 +2617,22 @@ function DiceFootballApp() {
 
   // Nueva temporada global (tras la Champions)
   const startNewGlobalSeason = () => {
+    // Si la Champions League finalizó o tiene final definida, asegurar el registro del campeón en el palmarés
+    const cl = comps['C1'];
+    if (cl) {
+      const final = cl.bracket?.Final?.[0] || cl.bracket?.Final;
+      if (final && final.sh !== null && final.sh !== undefined) {
+        let clWinnerId = null;
+        if (final.sh > final.sa) clWinnerId = final.hId;
+        else if (final.sa > final.sh) clWinnerId = final.aId;
+        else clWinnerId = ((final.penH || 0) > (final.penA || 0)) ? final.hId : final.aId;
+        const clWinner = (cl.teams || []).find((t: any) => t.id === clWinnerId);
+        if (clWinner) {
+          archiveCompetition('C1', 1, clWinner, cl);
+        }
+      }
+    }
+
     setComps(prev => {
       const next = { ...prev };
       LEAGUE_IDS.forEach(id => {
@@ -2613,35 +2682,37 @@ function DiceFootballApp() {
     } catch(e) {}
   };
 
-  const archiveCompetition = (compId, div, customWinner = null) => {
-    const comp = comps[compId];
+  const archiveCompetition = (compId, div, customWinner = null, compOverride = null) => {
+    const comp = compOverride || comps[compId];
     if (!comp) return;
     const isDiv2 = div === 2;
     const t = isDiv2 ? comp.teams2 : comp.teams;
 
     let winner = customWinner;
-    if (!winner) {
+    if (!winner && Array.isArray(t) && t.length > 0) {
       if (comp.type === 'league') {
-        winner = [...t].sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga))[0];
+        winner = [...t].sort((a, b) => (b.pts || 0) - (a.pts || 0) || ((b.gf || 0) - (b.ga || 0)) - ((a.gf || 0) - (a.ga || 0)))[0];
       } else {
         const final = comp.bracket?.Final?.[0] || comp.bracket?.Final;
-        if (final && final.sh !== null) {
+        if (final && final.sh !== null && final.sh !== undefined) {
           if (final.sh > final.sa) winner = t.find(x => x.id === final.hId);
           else if (final.sa > final.sh) winner = t.find(x => x.id === final.aId);
-          else winner = t.find(x => x.id === (final.penH > final.penA ? final.hId : final.aId));
+          else winner = t.find(x => x.id === (((final.penH || 0) > (final.penA || 0)) ? final.hId : final.aId));
         }
       }
     }
 
+    const currentSeasonNum = seasonState?.season || 1;
     const entry = { 
       id: Date.now(), compId, name: comp.name, date: new Date().toLocaleDateString(), div, winner, 
-      teams: t, history: isDiv2 ? comp.history2 : comp.history, bracket: comp.bracket, groups: comp.groups, type: comp.type 
+      teams: t, history: isDiv2 ? comp.history2 : comp.history, bracket: comp.bracket, groups: comp.groups, type: comp.type,
+      season: currentSeasonNum
     };
-    setArchive(prev => [entry, ...prev].slice(0, 10));
+    setArchive(prev => [entry, ...(prev || []).filter(e => !(e.compId === compId && e.div === div && e.season === currentSeasonNum))].slice(0, 20));
     if (winner) {
       registerTitle({
         compId, compName: comp.name, type: comp.type === 'league' ? 'league' : 'cup',
-        div, winner, season: seasonState?.season || 1
+        div, winner, season: currentSeasonNum
       });
     }
   };
@@ -4628,7 +4699,13 @@ function DiceFootballApp() {
       if (!c1 || c1.phase === 'Terminado' || c1.showWinner) return prev;
       const finishedC1 = simulateEntireCupToFinish(c1);
       if (finishedC1.showWinner) {
-        archiveCompetition('C1', 1);
+        const final = finishedC1.bracket?.Final?.[0] || finishedC1.bracket?.Final;
+        let clWinner = null;
+        if (final && final.sh !== null && final.sh !== undefined) {
+          const winId = (final.sh > final.sa) ? final.hId : (final.sa > final.sh) ? final.aId : (((final.penH || 0) > (final.penA || 0)) ? final.hId : final.aId);
+          clWinner = finishedC1.teams?.find((t: any) => t.id === winId);
+        }
+        archiveCompetition('C1', 1, clWinner, finishedC1);
       }
       return {
         ...prev,
@@ -5195,7 +5272,15 @@ function DiceFootballApp() {
        }
         const updatedComp = { history: [{ day: phase + (isChampions ? (isVuelta ? ' (Vuelta)' : ' (Ida)') : ''), results: allResults }, ...currentComp.history], matchday: currentComp.matchday + 1, phase: nextPhase, bracket: newBracket, showWinner };
         updateCompById(cId, updatedComp);
-        if (showWinner) archiveCompetition(cId, 1);
+        if (showWinner) {
+          const final = newBracket?.Final?.[0] || newBracket?.Final;
+          let clWinner = null;
+          if (final && final.sh !== null && final.sh !== undefined) {
+            const winId = (final.sh > final.sa) ? final.hId : (final.sa > final.sh) ? final.aId : (((final.penH || 0) > (final.penA || 0)) ? final.hId : final.aId);
+            clWinner = currentComp.teams?.find((t: any) => t.id === winId);
+          }
+          archiveCompetition(cId, 1, clWinner, { ...currentComp, ...updatedComp });
+        }
 
         // Check if user's team was eliminated in knockout (solo en vista standalone)
         if ((!isChampions || isVuelta || phase === 'Final') && cId === activeCompId) {
