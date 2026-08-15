@@ -25,6 +25,7 @@ import {
   remainingUpgradeCost, capPE, signingRepBonus, evaluateApplication, getMarketVacancies,
   SPECIAL_OFFICE_WEEKS, calculateCurrentSeasonWeek
 } from '@/lib/career';
+import { sanitizeChampionsBracket } from '@/lib/championsSanitizer';
 
 // ==========================================
 // 1. CONSTANTES DEL SISTEMA Y PRESETS
@@ -502,8 +503,8 @@ const getDefaultComps = () => {
     'L5': getLeagueData('Liga Holandesa', 'NL'),
     'L6': getLeagueData('Liga Francesa', 'FR'),
     'L7': getLeagueData('Miscelánea', 'MI'),
-    'C1': { type: 'cup', name: 'Champions League', teams: [], matchday: 0, history: [], userTeamId: 1, showWinner: false, phase: 'groups', bracket: null, disqualified: false },
-    'C2': { type: 'cup', name: 'Copa del Mundo', teams: [], matchday: 0, history: [], userTeamId: 1, showWinner: false, phase: 'groups', bracket: null, disqualified: false }
+    'C1': { id: 'C1', type: 'cup', name: 'Champions League', teams: [], matchday: 0, history: [], userTeamId: 1, showWinner: false, phase: 'groups', bracket: null, disqualified: false },
+    'C2': { id: 'C2', type: 'cup', name: 'Copa del Mundo', teams: [], matchday: 0, history: [], userTeamId: 1, showWinner: false, phase: 'groups', bracket: null, disqualified: false }
   };
 };
 
@@ -2429,7 +2430,14 @@ function DiceFootballApp() {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') {
           const merged = { ...defaultComps };
-          Object.keys(parsed).forEach(key => { if (merged[key]) merged[key] = { ...merged[key], ...parsed[key] }; });
+          Object.keys(parsed).forEach(key => {
+            if (merged[key]) {
+              merged[key] = { ...merged[key], ...parsed[key], id: key };
+            }
+          });
+          if (merged['C1']?.bracket) {
+            merged['C1'].bracket = sanitizeChampionsBracket(merged['C1'].bracket, merged['C1'].teams);
+          }
           return merged;
         }
       }
@@ -2868,11 +2876,6 @@ function DiceFootballApp() {
     });
   };
 
-  const simulateLeagueToGlobal = (compId) => syncLeaguesToGlobal([compId]);
-
-  // Botón "Simular jornada global": resuelve la jornada actual en TODAS las ligas.
-  const simulateAllPendingLeagues = () => syncLeaguesToGlobal(LEAGUE_IDS);
-
   // Tras un partido manual: el resto del universo resuelve la misma jornada global.
   const simulateOtherLeaguesToGlobal = (exceptId) =>
     syncLeaguesToGlobal(LEAGUE_IDS.filter(id => id !== exceptId));
@@ -2881,6 +2884,7 @@ function DiceFootballApp() {
   // MODO CARRERA (GDD DiceLeague V8 + V11)
   // ==========================================
   const CAREER_KEY = `${APP_ID}_career`;
+  const CAREER_HISTORY_KEY = `${APP_ID}_career_history`;
   const [career, setCareer] = useState(() => {
     try {
       const saved = window.localStorage.getItem(CAREER_KEY);
@@ -2889,6 +2893,124 @@ function DiceFootballApp() {
     return { ...DEFAULT_CAREER };
   });
   useEffect(() => { try { window.localStorage.setItem(CAREER_KEY, JSON.stringify(career)); } catch (e) {} }, [career]);
+
+  const [pastCareers, setPastCareers] = useState<any[]>(() => {
+    try {
+      const saved = window.localStorage.getItem(CAREER_HISTORY_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CAREER_HISTORY_KEY, JSON.stringify(pastCareers));
+    } catch (e) {}
+  }, [pastCareers]);
+
+  const handleDeleteCareerHard = () => {
+    // Restaurar atributos del club en la liga si fueron mejorados
+    if (career.teamId && career.originalTeamStats && career.originalTeamStats.teamId === career.teamId) {
+      const prevCompId = career.compId || career.originalTeamStats.compId;
+      const prevTeamsKey = (career.div === 2 || career.originalTeamStats.div === 2) ? 'teams2' : 'teams';
+      setComps(prev => {
+        const comp = prev[prevCompId];
+        if (!comp) return prev;
+        return {
+          ...prev,
+          [prevCompId]: {
+            ...comp,
+            [prevTeamsKey]: (comp[prevTeamsKey] || []).map(t =>
+              t.id === career.teamId
+                ? { ...t, att: career.originalTeamStats.att, opp: career.originalTeamStats.opp, def: career.originalTeamStats.def }
+                : t
+            )
+          }
+        };
+      });
+    }
+
+    setCareer({ ...DEFAULT_CAREER });
+    try {
+      window.localStorage.removeItem(CAREER_KEY);
+    } catch (e) {}
+    setView('careerSelect');
+  };
+
+  const handleArchiveAndResetCareer = () => {
+    // Archivar carrera actual con fecha y datos del club
+    const archiveEntry = {
+      id: 'arch_' + Date.now(),
+      date: new Date().toISOString(),
+      archivedAt: new Date().toISOString(),
+      manager: career.manager || 'Entrenador',
+      teamName: careerTeam?.name || 'Club',
+      teamId: career.teamId,
+      compId: career.compId,
+      div: career.div,
+      color1: careerTeam?.color1 || '#1e3a8a',
+      color2: careerTeam?.color2 || '#3b82f6',
+      isFlag: careerTeam?.isFlag,
+      reputation: career.reputation || 10,
+      tier: career.tier || 1,
+      startedSeason: 1,
+      finalSeason: (career.seasonHistory || []).length + (career.seasonLog?.length ? 1 : 1),
+      seasonsCount: (career.seasonHistory || []).length + (career.seasonLog?.length ? 1 : 1),
+      stats: {
+        matches: career.stats?.matches || 0,
+        wins: career.stats?.wins || 0,
+        draws: career.stats?.draws || 0,
+        losses: career.stats?.losses || 0,
+        gf: career.stats?.gf || 0,
+        ga: career.stats?.ga || 0,
+      },
+      trophies: {
+        leagues: career.trophies?.leagues || 0,
+        champions: career.trophies?.champions || 0,
+        promotions: career.trophies?.promotions || 0,
+      },
+      seasonHistory: [...(career.seasonHistory || [])],
+      clParticipations: career.clParticipations || 0,
+      hallOfFame: career.hallOfFame || false,
+      isChampion: (career.trophies?.leagues || 0) > 0 || (career.trophies?.champions || 0) > 0,
+      status: (career.trophies?.champions || 0) > 0 ? 'Leyenda Continental' : (career.trophies?.leagues || 0) > 0 ? 'Campeón de Liga' : 'Proyecto Finalizado'
+    };
+
+    setPastCareers(prev => [archiveEntry, ...prev]);
+
+    // Restaurar atributos del club en la liga si fueron mejorados
+    if (career.teamId && career.originalTeamStats && career.originalTeamStats.teamId === career.teamId) {
+      const prevCompId = career.compId || career.originalTeamStats.compId;
+      const prevTeamsKey = (career.div === 2 || career.originalTeamStats.div === 2) ? 'teams2' : 'teams';
+      setComps(prev => {
+        const comp = prev[prevCompId];
+        if (!comp) return prev;
+        return {
+          ...prev,
+          [prevCompId]: {
+            ...comp,
+            [prevTeamsKey]: (comp[prevTeamsKey] || []).map(t =>
+              t.id === career.teamId
+                ? { ...t, att: career.originalTeamStats.att, opp: career.originalTeamStats.opp, def: career.originalTeamStats.def }
+                : t
+            )
+          }
+        };
+      });
+    }
+
+    setCareer({ ...DEFAULT_CAREER });
+    try {
+      window.localStorage.removeItem(CAREER_KEY);
+    } catch (e) {}
+    setView('careerSelect');
+  };
+
+  const handleDeletePastCareer = (idOrIndex: string | number) => {
+    setPastCareers(prev => prev.filter((c, i) => (typeof idOrIndex === 'number' ? i !== idOrIndex : c.id !== idOrIndex)));
+  };
   const [careerReview, setCareerReview] = useState(null);
   const [simulationInjuryAlert, setSimulationInjuryAlert] = useState<{
     affectedAttr: 'att' | 'opp' | 'def';
@@ -3497,7 +3619,9 @@ function DiceFootballApp() {
     });
 
     setMatchState(null);
-    setView('career');
+    if (view === 'careerMatch') {
+      setView('career');
+    }
   };
 
   // Resuelve la jornada tras jugar el partido con dados
@@ -3682,6 +3806,24 @@ function DiceFootballApp() {
     }
 
     executeCareerSimulatedMatch(injuryAttr, trainingFeedback, extraPeGained, newImmunityWeeks, injuryOccurredInSim);
+  };
+
+  const simulateLeagueToGlobal = (compId: string) => {
+    if (career?.active && career.compId === compId && careerTeam && careerFixture && !careerDivisionFinished) {
+      simulateCareerMatchday();
+    } else {
+      syncLeaguesToGlobal([compId]);
+    }
+  };
+
+  // Botón "Simular jornada global" / "Simular semana": resuelve la jornada actual en TODAS las ligas.
+  // Si hay una carrera activa con partido pendiente en esta jornada, se juega asistido por la IA para el entrenador.
+  const simulateAllPendingLeagues = () => {
+    if (career?.active && careerTeam && careerFixture && !careerDivisionFinished) {
+      simulateCareerMatchday();
+    } else {
+      syncLeaguesToGlobal(LEAGUE_IDS);
+    }
   };
 
   /* ===================== CHAMPIONS EN MODO CARRERA =====================
@@ -4307,16 +4449,19 @@ function DiceFootballApp() {
   };
 
   // Simulación completa de una copa / torneo hasta su finalización en una sola ejecución pura
-  const simulateEntireCupToFinish = (initialComp: any) => {
+  const simulateEntireCupToFinish = (initialComp: any, compId: string = 'C1') => {
     if (!initialComp || initialComp.type === 'league') return initialComp;
     let comp = JSON.parse(JSON.stringify(initialComp));
+    const targetId = comp.id || compId || (comp.name?.includes('Champions') || (Array.isArray(comp.groups) && comp.groups.length === 8) ? 'C1' : 'C2');
+    comp.id = targetId;
+    const isChampions = targetId === 'C1' || comp.name?.includes('Champions') || (Array.isArray(comp.groups) && comp.groups.length === 8);
+    const isWorldCup = targetId === 'C2' || comp.name?.includes('Mundial') || comp.name?.includes('World');
     let guard = 0;
 
     while (guard++ < 40) {
       if (comp.phase === 'Terminado' || comp.showWinner) break;
 
       if (comp.phase === 'groups') {
-        const isWorldCup = comp.id === 'C2';
         const maxMatchdays = isWorldCup ? 3 : 6;
         const results: any[] = [];
 
@@ -4374,7 +4519,6 @@ function DiceFootballApp() {
         };
       } else {
         // Knockout
-        const isChampions = comp.id === 'C1';
         const phase = comp.phase;
         const isVuelta = isChampions && (comp.matchday || 0) % 2 !== 0 && phase !== 'Final';
         const newBracket = { ...comp.bracket };
@@ -4468,6 +4612,10 @@ function DiceFootballApp() {
           showWinner
         };
       }
+    }
+
+    if (isChampions && comp.bracket) {
+      comp.bracket = sanitizeChampionsBracket(comp.bracket, comp.teams);
     }
 
     return comp;
@@ -4998,7 +5146,7 @@ function DiceFootballApp() {
 
     } else {
        // Eliminatorias
-       const isChampions = cId === 'C1';
+       const isChampions = cId === 'C1' || currentComp.id === 'C1' || currentComp.name?.includes('Champions') || (Array.isArray(currentComp.groups) && currentComp.groups.length === 8);
        const phase = currentComp.phase;
        const isVuelta = isChampions && currentComp.matchday % 2 !== 0 && phase !== 'Final';
        const newBracket = { ...currentComp.bracket };
@@ -5791,57 +5939,120 @@ function DiceFootballApp() {
                 {championModalTab === 'bracket' && !isLeague && activeComp.bracket && (
                   <div>
                     <h3 className='text-sm font-black uppercase text-slate-200 mb-4 text-center'>Eliminatorias</h3>
-                    <div className='flex gap-6 overflow-x-auto custom-scrollbar pb-4'>
-                      {['Octavos', 'Cuartos', 'Semis', 'Final'].filter(p => activeComp.bracket[p]).map(phase => (
-                        <div key={phase} className='min-w-[240px] flex-shrink-0'>
-                          <h4 className='text-[10px] font-black uppercase text-blue-300 mb-3 px-3 border-l-2 border-blue-500 bg-slate-900/40 rounded-r-xl py-1'>{phase}</h4>
-                          <div className='grid grid-cols-1 gap-2.5'>
-                            {(Array.isArray(activeComp.bracket[phase]) ? activeComp.bracket[phase] : [activeComp.bracket[phase]]).filter(m => m !== null).map((m, mi) => {
-                              const h = activeComp.teams.find(t => t.id === m.hId);
-                              const a = activeComp.teams.find(t => t.id === m.aId);
-                              const isChampions = activeCompId === 'C1';
-                              let bWinner = null;
-                              if ((isChampions && phase !== 'Final' ? m.sh2 !== null : m.sh !== null)) {
-                                if (isChampions && phase !== 'Final') {
-                                  const totH = (m.sh || 0) + (m.sh2 || 0); const totA = (m.sa || 0) + (m.sa2 || 0);
-                                  if (totH > totA) bWinner = h; else if (totA > totH) bWinner = a; else if (m.penH !== null && m.penH !== undefined) bWinner = m.penH > m.penA ? h : a;
-                                } else {
-                                  if (m.sh > m.sa) bWinner = h; else if (m.sa > m.sh) bWinner = a; else if (m.penH !== null && m.penH !== undefined) bWinner = m.penH > m.penA ? h : a;
-                                }
-                              }
-                              return (
-                                <div key={mi} className='bg-slate-900/40 rounded-xl p-2.5 border border-white/10 flex flex-col gap-1.5'>
-                                  <div className='flex justify-between items-center'>
-                                    <div className='flex items-center gap-1.5 flex-1 truncate'>
-                                      <Shield color1={h?.color1} color2={h?.color2} initial={h?.name} size='xs' isFlag={h?.isFlag} />
-                                      <span className={'text-[9px] font-bold uppercase italic truncate ' + (h ? '' : 'text-slate-500')}>{h?.name || 'TBD'}</span>
-                                    </div>
-                                    <div className='flex items-center gap-1 tabular-nums font-black italic text-[10px] bg-black/30 px-1.5 py-0.5 rounded'>
-                                      {m.sh !== null && <span>{m.sh}</span>}{isChampions && m.sh2 !== null && <span className='text-slate-400 text-[8px]'>({m.sh2})</span>}{m.penH !== null && m.penH !== undefined && <span className='text-red-400 text-[8px] font-black'>[{m.penH}]</span>}
-                                    </div>
-                                  </div>
-                                  <div className='flex justify-between items-center'>
-                                    <div className='flex items-center gap-1.5 flex-1 truncate'>
-                                      <Shield color1={a?.color1} color2={a?.color2} initial={a?.name} size='xs' isFlag={a?.isFlag} />
-                                      <span className={'text-[9px] font-bold uppercase italic truncate ' + (a ? '' : 'text-slate-500')}>{a?.name || 'TBD'}</span>
-                                    </div>
-                                    <div className='flex items-center gap-1 tabular-nums font-black italic text-[10px] bg-black/30 px-1.5 py-0.5 rounded'>
-                                      {m.sa !== null && <span>{m.sa}</span>}{isChampions && m.sa2 !== null && <span className='text-slate-400 text-[8px]'>({m.sa2})</span>}{m.penA !== null && m.penA !== undefined && <span className='text-red-400 text-[8px] font-black'>[{m.penA}]</span>}
-                                    </div>
-                                  </div>
-                                  {bWinner && (
-                                    <div className='mt-1 pt-1.5 border-t border-white/10 flex items-center justify-center gap-1.5 bg-emerald-900/30 rounded-b-lg py-1'>
-                                      <span className='text-[7px] font-black uppercase text-emerald-300 italic'>Pasa:</span>
-                                      <Shield color1={bWinner.color1} color2={bWinner.color2} initial={bWinner.name} size='xs' isFlag={bWinner.isFlag} />
-                                      <span className='text-[8px] font-black uppercase italic truncate max-w-[80px]'>{bWinner.name}</span>
-                                    </div>
-                                  )}
+                    <div className='flex gap-4 overflow-x-auto custom-scrollbar pb-4'>
+                      {['Octavos', 'Cuartos', 'Semis', 'Final'].filter(p => activeComp.bracket[p]).map(phase => {
+                        const isChampions = activeCompId === 'C1';
+                        const isTwoLegged = isChampions && phase !== 'Final';
+                        return (
+                          <div key={phase} className='min-w-[260px] sm:min-w-[290px] flex-shrink-0 space-y-2.5'>
+                            <div className='flex items-center justify-between bg-slate-900/60 px-3 py-1.5 rounded-xl border border-white/10'>
+                              <h4 className='text-[10px] font-black uppercase text-blue-300'>{phase}</h4>
+                              {isTwoLegged ? (
+                                <div className='flex items-center gap-2 text-[7px] font-black uppercase tracking-wider text-slate-400'>
+                                  <span className='w-5 text-center'>Ida</span>
+                                  <span className='w-5 text-center'>Vta</span>
+                                  <span className='w-6 text-center text-amber-300'>Glob</span>
                                 </div>
-                              );
-                            })}
+                              ) : (
+                                <span className='text-[7.5px] font-bold text-amber-300 uppercase'>Final</span>
+                              )}
+                            </div>
+                            <div className='grid grid-cols-1 gap-2.5'>
+                              {(Array.isArray(activeComp.bracket[phase]) ? activeComp.bracket[phase] : [activeComp.bracket[phase]]).filter(m => m !== null).map((m, mi) => {
+                                const h = activeComp.teams.find(t => t.id === m.hId);
+                                const a = activeComp.teams.find(t => t.id === m.aId);
+                                let bWinner = null;
+                                const hasIda = m.sh !== null && m.sh !== undefined;
+                                const hasVuelta = isTwoLegged && m.sh2 !== null && m.sh2 !== undefined;
+                                const totH = (m.sh || 0) + (m.sh2 || 0);
+                                const totA = (m.sa || 0) + (m.sa2 || 0);
+
+                                if (isTwoLegged ? hasVuelta : hasIda) {
+                                  if (isTwoLegged) {
+                                    if (totH > totA) bWinner = h;
+                                    else if (totA > totH) bWinner = a;
+                                    else if (m.penH !== null && m.penH !== undefined) bWinner = m.penH > m.penA ? h : a;
+                                  } else {
+                                    if (m.sh > m.sa) bWinner = h;
+                                    else if (m.sa > m.sh) bWinner = a;
+                                    else if (m.penH !== null && m.penH !== undefined) bWinner = m.penH > m.penA ? h : a;
+                                  }
+                                }
+
+                                return (
+                                  <div key={mi} className='bg-slate-900/50 rounded-2xl p-3 border border-white/10 flex flex-col gap-1.5 shadow-md'>
+                                    {/* Fila Equipo 1 */}
+                                    <div className='flex justify-between items-center py-0.5'>
+                                      <div className='flex items-center gap-1.5 flex-1 min-w-0 pr-1'>
+                                        <Shield color1={h?.color1} color2={h?.color2} initial={h?.name} size='xs' isFlag={h?.isFlag} />
+                                        <span className={`text-[9px] font-black uppercase italic truncate ${bWinner?.id === h?.id ? 'text-amber-300 font-black' : h ? 'text-slate-200' : 'text-slate-500'}`}>
+                                          {h?.name || 'TBD'}
+                                        </span>
+                                      </div>
+                                      {isTwoLegged ? (
+                                        <div className='flex items-center gap-1.5 tabular-nums text-[9px] shrink-0 font-bold'>
+                                          <span className={`w-5 text-center py-0.5 rounded ${hasIda ? 'bg-black/40 text-slate-200' : 'text-slate-600'}`}>{hasIda ? m.sh : '—'}</span>
+                                          <span className={`w-5 text-center py-0.5 rounded ${hasVuelta ? 'bg-black/40 text-slate-200' : 'text-slate-600'}`}>{hasVuelta ? m.sh2 : '—'}</span>
+                                          <span className={`w-6 text-center py-0.5 rounded font-black ${hasVuelta ? (bWinner?.id === h?.id ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300') : 'text-slate-600'}`}>
+                                            {hasVuelta ? totH : '—'}
+                                          </span>
+                                          {hasVuelta && m.penH !== null && m.penH !== undefined && (
+                                            <span className='text-amber-400 text-[7px] font-black'>({m.penH})</span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div className='flex items-center gap-1 tabular-nums text-[10px] font-black'>
+                                          <span className={`px-2 py-0.5 rounded ${hasIda ? (bWinner?.id === h?.id ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-200') : 'text-slate-600'}`}>
+                                            {hasIda ? m.sh : '—'}
+                                          </span>
+                                          {m.penH !== null && m.penH !== undefined && <span className='text-amber-400 text-[7px]'>({m.penH})</span>}
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Fila Equipo 2 */}
+                                    <div className='flex justify-between items-center py-0.5 border-t border-white/5'>
+                                      <div className='flex items-center gap-1.5 flex-1 min-w-0 pr-1'>
+                                        <Shield color1={a?.color1} color2={a?.color2} initial={a?.name} size='xs' isFlag={a?.isFlag} />
+                                        <span className={`text-[9px] font-black uppercase italic truncate ${bWinner?.id === a?.id ? 'text-amber-300 font-black' : a ? 'text-slate-200' : 'text-slate-500'}`}>
+                                          {a?.name || 'TBD'}
+                                        </span>
+                                      </div>
+                                      {isTwoLegged ? (
+                                        <div className='flex items-center gap-1.5 tabular-nums text-[9px] shrink-0 font-bold'>
+                                          <span className={`w-5 text-center py-0.5 rounded ${hasIda ? 'bg-black/40 text-slate-200' : 'text-slate-600'}`}>{hasIda ? m.sa : '—'}</span>
+                                          <span className={`w-5 text-center py-0.5 rounded ${hasVuelta ? 'bg-black/40 text-slate-200' : 'text-slate-600'}`}>{hasVuelta ? m.sa2 : '—'}</span>
+                                          <span className={`w-6 text-center py-0.5 rounded font-black ${hasVuelta ? (bWinner?.id === a?.id ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300') : 'text-slate-600'}`}>
+                                            {hasVuelta ? totA : '—'}
+                                          </span>
+                                          {hasVuelta && m.penA !== null && m.penA !== undefined && (
+                                            <span className='text-amber-400 text-[7px] font-black'>({m.penA})</span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div className='flex items-center gap-1 tabular-nums text-[10px] font-black'>
+                                          <span className={`px-2 py-0.5 rounded ${hasIda ? (bWinner?.id === a?.id ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-200') : 'text-slate-600'}`}>
+                                            {hasIda ? m.sa : '—'}
+                                          </span>
+                                          {m.penA !== null && m.penA !== undefined && <span className='text-amber-400 text-[7px]'>({m.penA})</span>}
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Indicador de Ganador / Clasificado */}
+                                    {bWinner ? (
+                                      <div className='mt-1 pt-1.5 border-t border-white/10 flex items-center justify-between text-[8px] font-black uppercase text-emerald-400'>
+                                        <span>{phase === 'Final' ? '🏆 Campeón:' : 'Pasa:'}</span>
+                                        <span className='text-amber-300 truncate max-w-[140px]'>{bWinner.name}</span>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -6376,33 +6587,58 @@ function DiceFootballApp() {
                             if (!m) return null;
                             const home = activeComp.teams.find(t => t.id === m.hId); const away = activeComp.teams.find(t => t.id === m.aId);
                             const isChampions = activeCompId === 'C1';
-                            const isPlayedIda = m.sh !== null; const isPlayedVuelta = m.sh2 !== null;
+                            const isTwoLegged = isChampions && phase !== 'Final';
+                            const isPlayedIda = m.sh !== null && m.sh !== undefined;
+                            const isPlayedVuelta = isTwoLegged && m.sh2 !== null && m.sh2 !== undefined;
+                            const totH = (m.sh || 0) + (m.sh2 || 0);
+                            const totA = (m.sa || 0) + (m.sa2 || 0);
+
+                            let passWinner = null;
+                            if (isTwoLegged ? isPlayedVuelta : isPlayedIda) {
+                              if (isTwoLegged) {
+                                if (totH > totA) passWinner = home;
+                                else if (totA > totH) passWinner = away;
+                                else if (m.penH !== null && m.penH !== undefined) passWinner = m.penH > m.penA ? home : away;
+                              } else {
+                                if (m.sh > m.sa) passWinner = home;
+                                else if (m.sa > m.sh) passWinner = away;
+                                else if (m.penH !== null && m.penH !== undefined) passWinner = m.penH > m.penA ? home : away;
+                              }
+                            }
 
                             return (
                               <div key={mi} className='flex flex-col bg-black/30 p-3 rounded-2xl gap-2 border border-white/5'>
                                 <div className='flex items-center justify-between'>
-                                  <div className='flex items-center gap-2 w-28'><Shield color1={home?.color1} color2={home?.color2} initial={home?.name} size='xs' isFlag={home?.isFlag} /><span className='text-[9px] font-bold uppercase truncate italic'>{home?.name || 'TBD'}</span></div>
+                                  <div className='flex items-center gap-2 w-28'><Shield color1={home?.color1} color2={home?.color2} initial={home?.name} size='xs' isFlag={home?.isFlag} /><span className={`text-[9px] font-bold uppercase truncate italic ${passWinner?.id === home?.id ? 'text-amber-300 font-black' : ''}`}>{home?.name || 'TBD'}</span></div>
                                   <div className='flex flex-col items-center flex-1'>
                                     {isPlayedIda ? <div className='flex items-center gap-2 bg-slate-800/60 px-1.5 rounded'><span className='text-[10px] font-black tabular-nums'>{m.sh} - {m.sa}</span><span className='text-[7px] font-bold text-slate-400 uppercase italic'>Ida</span></div> : <span className='text-[8px] font-black text-slate-500 italic'>VS (Ida)</span>}
                                   </div>
-                                  <div className='flex items-center gap-2 w-28 justify-end'><span className='text-[9px] font-bold uppercase truncate italic text-right'>{away?.name || 'TBD'}</span><Shield color1={away?.color1} color2={away?.color2} initial={away?.name} size='xs' isFlag={away?.isFlag} /></div>
+                                  <div className='flex items-center gap-2 w-28 justify-end'><span className={`text-[9px] font-bold uppercase truncate italic text-right ${passWinner?.id === away?.id ? 'text-amber-300 font-black' : ''}`}>{away?.name || 'TBD'}</span><Shield color1={away?.color1} color2={away?.color2} initial={away?.name} size='xs' isFlag={away?.isFlag} /></div>
                                 </div>
 
-                                {isChampions && phase !== 'Final' && (
+                                {isTwoLegged && (
                                   <div className='flex items-center justify-between border-t border-white/10 pt-2'>
-                                    <div className='flex items-center gap-2 w-28'><Shield color1={away?.color1} color2={away?.color2} initial={away?.name} size='xs' isFlag={away?.isFlag} /><span className='text-[9px] font-bold uppercase truncate italic'>{away?.name || 'TBD'}</span></div>
+                                    <div className='flex items-center gap-2 w-28'><Shield color1={away?.color1} color2={away?.color2} initial={away?.name} size='xs' isFlag={away?.isFlag} /><span className={`text-[9px] font-bold uppercase truncate italic ${passWinner?.id === away?.id ? 'text-amber-300 font-black' : ''}`}>{away?.name || 'TBD'}</span></div>
                                     <div className='flex flex-col items-center flex-1'>
                                       {isPlayedVuelta ? (
                                         <div className='flex flex-col items-center'>
                                           <div className='flex items-center gap-2 bg-slate-800/60 px-1.5 rounded'><span className='text-[10px] font-black tabular-nums'>{m.sh2} - {m.sa2}</span><span className='text-[7px] font-bold text-slate-400 uppercase italic'>Vuelta</span></div>
                                           <div className='flex items-center gap-1 mt-1'>
-                                            <span className='text-[8px] font-black text-blue-300 uppercase italic bg-blue-900/40 px-1.5 rounded'>Global: {m.sh + m.sh2} - {m.sa + m.sa2}</span>
+                                            <span className='text-[8px] font-black text-amber-300 uppercase italic bg-amber-500/20 border border-amber-500/30 px-1.5 rounded'>Global: {totH} - {totA}</span>
                                             {m.penH !== undefined && m.penH !== null && <span className='text-[7px] text-blue-200 font-bold'>(pen {m.penH}-{m.penA})</span>}
                                           </div>
                                         </div>
-                                      ) : <span className='text-[7px] font-bold text-slate-500 uppercase italic'>Vuelta Pendiente</span>}
+                                      ) : <span className='text-[8px] font-black text-slate-500 italic'>VS (Vuelta)</span>}
                                     </div>
-                                    <div className='flex items-center gap-2 w-28 justify-end'><span className='text-[9px] font-bold uppercase truncate italic text-right'>{home?.name || 'TBD'}</span><Shield color1={home?.color1} color2={home?.color2} initial={home?.name} size='xs' isFlag={home?.isFlag} /></div>
+                                    <div className='flex items-center gap-2 w-28 justify-end'><span className={`text-[9px] font-bold uppercase truncate italic text-right ${passWinner?.id === home?.id ? 'text-amber-300 font-black' : ''}`}>{home?.name || 'TBD'}</span><Shield color1={home?.color1} color2={home?.color2} initial={home?.name} size='xs' isFlag={home?.isFlag} /></div>
+                                  </div>
+                                )}
+
+                                {passWinner && (
+                                  <div className='mt-1 pt-1.5 border-t border-white/10 flex items-center justify-center gap-1.5 bg-emerald-900/30 rounded-xl py-1'>
+                                    <span className='text-[7.5px] font-black uppercase text-emerald-300 italic'>{phase === 'Final' ? '🏆 Campeón:' : 'Pasa:'}</span>
+                                    <Shield color1={passWinner.color1} color2={passWinner.color2} initial={passWinner.name} size='xs' isFlag={passWinner.isFlag} />
+                                    <span className='text-[8px] font-black uppercase italic text-white truncate max-w-[120px]'>{passWinner.name}</span>
                                   </div>
                                 )}
                               </div>
@@ -6429,51 +6665,120 @@ function DiceFootballApp() {
         {!activeComp.bracket ? (
           <div className='text-center py-20 text-slate-300 font-black bg-slate-900/30 backdrop-blur-md rounded-[2rem] border border-white/10 uppercase italic text-[10px] shadow-lg'>Las eliminatorias se generarán al finalizar la fase de grupos.</div>
         ) : (
-          <div className='flex gap-8 overflow-x-auto custom-scrollbar pb-8'>
-            {['Octavos', 'Cuartos', 'Semis', 'Final'].filter(p => activeComp.bracket[p]).map(phase => (
-              <div key={phase} className='min-w-[280px] flex-shrink-0'>
-                <h3 className='text-[10px] font-black uppercase text-blue-300 mb-4 px-3 border-l-2 border-blue-500 bg-slate-900/40 backdrop-blur-md rounded-r-xl py-1 drop-shadow-md'>{phase}</h3>
-                <div className='grid grid-cols-1 gap-3'>
-                  {(Array.isArray(activeComp.bracket[phase]) ? activeComp.bracket[phase] : [activeComp.bracket[phase]]).filter(m => m !== null).map((m, mi) => {
-                    const h = activeComp.teams.find(t => t.id === m.hId); const a = activeComp.teams.find(t => t.id === m.aId);
-                    const isChampions = activeCompId === 'C1';
-                    let winner = null;
-                    if ((isChampions && phase !== 'Final' ? m.sh2 !== null : m.sh !== null)) {
-                      if (isChampions && phase !== 'Final') {
-                        const totH = (m.sh || 0) + (m.sh2 || 0); const totA = (m.sa || 0) + (m.sa2 || 0);
-                        if (totH > totA) winner = h; else if (totA > totH) winner = a; else if (m.penH !== null && m.penH !== undefined) winner = m.penH > m.penA ? h : a;
-                      } else {
-                        if (m.sh > m.sa) winner = h; else if (m.sa > m.sh) winner = a; else if (m.penH !== null && m.penH !== undefined) winner = m.penH > m.penA ? h : a;
-                      }
-                    }
-
-                    return (
-                      <div key={mi} className='bg-slate-900/30 backdrop-blur-md rounded-2xl p-3 border border-white/10 flex flex-col gap-2 shadow-lg'>
-                        <div className='flex justify-between items-center'>
-                          <div className='flex items-center gap-2 flex-1'><Shield color1={h?.color1} color2={h?.color2} initial={h?.name} size='xs' isFlag={h?.isFlag} /><span className={'text-[10px] font-bold uppercase italic truncate ' + (h ? 'text-white' : 'text-slate-400')}>{h?.name || 'TBD'}</span></div>
-                          <div className='flex items-center gap-2 tabular-nums font-black italic text-xs bg-black/30 px-2 py-0.5 rounded'>
-                            {m.sh !== null && <span>{m.sh}</span>}{isChampions && m.sh2 !== null && <span className='text-slate-400 text-[10px]'>({m.sh2})</span>}{m.penH !== null && m.penH !== undefined && <span className='text-red-400 text-[9px] font-black'>[{m.penH}]</span>}
-                          </div>
-                        </div>
-                        <div className='flex justify-between items-center'>
-                          <div className='flex items-center gap-2 flex-1'><Shield color1={a?.color1} color2={a?.color2} initial={a?.name} size='xs' isFlag={a?.isFlag} /><span className={'text-[10px] font-bold uppercase italic truncate ' + (a ? 'text-white' : 'text-slate-400')}>{a?.name || 'TBD'}</span></div>
-                          <div className='flex items-center gap-2 tabular-nums font-black italic text-xs bg-black/30 px-2 py-0.5 rounded'>
-                            {m.sa !== null && <span>{m.sa}</span>}{isChampions && m.sa2 !== null && <span className='text-slate-400 text-[10px]'>({m.sa2})</span>}{m.penA !== null && m.penA !== undefined && <span className='text-red-400 text-[9px] font-black'>[{m.penA}]</span>}
-                          </div>
-                        </div>
-                        {winner && (
-                          <div className='mt-2 pt-2 border-t border-white/10 flex items-center justify-center gap-2 bg-emerald-900/30 backdrop-blur-sm rounded-b-xl'>
-                            <span className='text-[7px] font-black uppercase text-emerald-300 italic'>Pasa:</span>
-                            <Shield color1={winner.color1} color2={winner.color2} initial={winner.name} size='xs' isFlag={winner.isFlag} />
-                            <span className='text-[8px] font-black uppercase italic text-white truncate max-w-[100px]'>{winner.name}</span>
-                          </div>
-                        )}
+          <div className='flex gap-4 overflow-x-auto custom-scrollbar pb-8'>
+            {['Octavos', 'Cuartos', 'Semis', 'Final'].filter(p => activeComp.bracket[p]).map(phase => {
+              const isChampions = activeCompId === 'C1';
+              const isTwoLegged = isChampions && phase !== 'Final';
+              return (
+                <div key={phase} className='min-w-[260px] sm:min-w-[290px] flex-shrink-0 space-y-2.5'>
+                  <div className='flex items-center justify-between bg-slate-900/60 px-3 py-2 rounded-xl border border-white/10'>
+                    <h3 className='text-[10px] font-black uppercase text-blue-300'>{phase}</h3>
+                    {isTwoLegged ? (
+                      <div className='flex items-center gap-2 text-[7px] font-black uppercase tracking-wider text-slate-400'>
+                        <span className='w-5 text-center'>Ida</span>
+                        <span className='w-5 text-center'>Vta</span>
+                        <span className='w-6 text-center text-amber-300'>Glob</span>
                       </div>
-                    );
-                  })}
+                    ) : (
+                      <span className='text-[7.5px] font-bold text-amber-300 uppercase'>Final</span>
+                    )}
+                  </div>
+                  <div className='grid grid-cols-1 gap-2.5'>
+                    {(Array.isArray(activeComp.bracket[phase]) ? activeComp.bracket[phase] : [activeComp.bracket[phase]]).filter(m => m !== null).map((m, mi) => {
+                      const h = activeComp.teams.find(t => t.id === m.hId);
+                      const a = activeComp.teams.find(t => t.id === m.aId);
+                      let winner = null;
+                      const hasIda = m.sh !== null && m.sh !== undefined;
+                      const hasVuelta = isTwoLegged && m.sh2 !== null && m.sh2 !== undefined;
+                      const totH = (m.sh || 0) + (m.sh2 || 0);
+                      const totA = (m.sa || 0) + (m.sa2 || 0);
+
+                      if (isTwoLegged ? hasVuelta : hasIda) {
+                        if (isTwoLegged) {
+                          if (totH > totA) winner = h;
+                          else if (totA > totH) winner = a;
+                          else if (m.penH !== null && m.penH !== undefined) winner = m.penH > m.penA ? h : a;
+                        } else {
+                          if (m.sh > m.sa) winner = h;
+                          else if (m.sa > m.sh) winner = a;
+                          else if (m.penH !== null && m.penH !== undefined) winner = m.penH > m.penA ? h : a;
+                        }
+                      }
+
+                      return (
+                        <div key={mi} className='bg-slate-900/50 rounded-2xl p-3 border border-white/10 flex flex-col gap-1.5 shadow-md'>
+                          {/* Fila Equipo 1 */}
+                          <div className='flex justify-between items-center py-0.5'>
+                            <div className='flex items-center gap-1.5 flex-1 min-w-0 pr-1'>
+                              <Shield color1={h?.color1} color2={h?.color2} initial={h?.name} size='xs' isFlag={h?.isFlag} />
+                              <span className={`text-[9px] font-black uppercase italic truncate ${winner?.id === h?.id ? 'text-amber-300 font-black' : h ? 'text-slate-200' : 'text-slate-500'}`}>
+                                {h?.name || 'TBD'}
+                              </span>
+                            </div>
+                            {isTwoLegged ? (
+                              <div className='flex items-center gap-1.5 tabular-nums text-[9px] shrink-0 font-bold'>
+                                <span className={`w-5 text-center py-0.5 rounded ${hasIda ? 'bg-black/40 text-slate-200' : 'text-slate-600'}`}>{hasIda ? m.sh : '—'}</span>
+                                <span className={`w-5 text-center py-0.5 rounded ${hasVuelta ? 'bg-black/40 text-slate-200' : 'text-slate-600'}`}>{hasVuelta ? m.sh2 : '—'}</span>
+                                <span className={`w-6 text-center py-0.5 rounded font-black ${hasVuelta ? (winner?.id === h?.id ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300') : 'text-slate-600'}`}>
+                                  {hasVuelta ? totH : '—'}
+                                </span>
+                                {hasVuelta && m.penH !== null && m.penH !== undefined && (
+                                  <span className='text-amber-400 text-[7px] font-black'>({m.penH})</span>
+                                )}
+                              </div>
+                            ) : (
+                              <div className='flex items-center gap-1 tabular-nums text-[10px] font-black'>
+                                <span className={`px-2 py-0.5 rounded ${hasIda ? (winner?.id === h?.id ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-200') : 'text-slate-600'}`}>
+                                  {hasIda ? m.sh : '—'}
+                                </span>
+                                {m.penH !== null && m.penH !== undefined && <span className='text-amber-400 text-[7px]'>({m.penH})</span>}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Fila Equipo 2 */}
+                          <div className='flex justify-between items-center py-0.5 border-t border-white/5'>
+                            <div className='flex items-center gap-1.5 flex-1 min-w-0 pr-1'>
+                              <Shield color1={a?.color1} color2={a?.color2} initial={a?.name} size='xs' isFlag={a?.isFlag} />
+                              <span className={`text-[9px] font-black uppercase italic truncate ${winner?.id === a?.id ? 'text-amber-300 font-black' : a ? 'text-slate-200' : 'text-slate-500'}`}>
+                                {a?.name || 'TBD'}
+                              </span>
+                            </div>
+                            {isTwoLegged ? (
+                              <div className='flex items-center gap-1.5 tabular-nums text-[9px] shrink-0 font-bold'>
+                                <span className={`w-5 text-center py-0.5 rounded ${hasIda ? 'bg-black/40 text-slate-200' : 'text-slate-600'}`}>{hasIda ? m.sa : '—'}</span>
+                                <span className={`w-5 text-center py-0.5 rounded ${hasVuelta ? 'bg-black/40 text-slate-200' : 'text-slate-600'}`}>{hasVuelta ? m.sa2 : '—'}</span>
+                                <span className={`w-6 text-center py-0.5 rounded font-black ${hasVuelta ? (winner?.id === a?.id ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300') : 'text-slate-600'}`}>
+                                  {hasVuelta ? totA : '—'}
+                                </span>
+                                {hasVuelta && m.penA !== null && m.penA !== undefined && (
+                                  <span className='text-amber-400 text-[7px] font-black'>({m.penA})</span>
+                                )}
+                              </div>
+                            ) : (
+                              <div className='flex items-center gap-1 tabular-nums text-[10px] font-black'>
+                                <span className={`px-2 py-0.5 rounded ${hasIda ? (winner?.id === a?.id ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-200') : 'text-slate-600'}`}>
+                                  {hasIda ? m.sa : '—'}
+                                </span>
+                                {m.penA !== null && m.penA !== undefined && <span className='text-amber-400 text-[7px]'>({m.penA})</span>}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Indicador de Ganador / Clasificado */}
+                          {winner ? (
+                            <div className='mt-1 pt-1.5 border-t border-white/10 flex items-center justify-between text-[8px] font-black uppercase text-emerald-400'>
+                              <span>{phase === 'Final' ? '🏆 Campeón:' : 'Pasa:'}</span>
+                              <span className='text-amber-300 truncate max-w-[140px]'>{winner.name}</span>
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -6610,6 +6915,8 @@ function DiceFootballApp() {
                 leagueName={comps[CAREER_LEAGUE_ID]?.name || 'Miscelánea'}
                 onBack={() => setView('hub')}
                 onStart={startCareer}
+                pastCareers={pastCareers}
+                onDeletePastCareer={handleDeletePastCareer}
                 ui={careerUi}
               />
             </motion.div>
@@ -6659,6 +6966,10 @@ function DiceFootballApp() {
                 onAdvanceOfficeWeek={advanceCareerOfficeWeek}
                 onDismissAppResolutionModal={() => setCareer(c => ({ ...c, pendingAppResolutionModal: null }))}
                 onDismissSimulationFeedback={() => setCareer(c => ({ ...c, lastSimulationFeedback: null }))}
+                onDeleteCareer={handleDeleteCareerHard}
+                onArchiveAndResetCareer={handleArchiveAndResetCareer}
+                pastCareers={pastCareers}
+                onDeletePastCareer={handleDeletePastCareer}
                 allComps={comps}
                 ui={careerUi}
               />
