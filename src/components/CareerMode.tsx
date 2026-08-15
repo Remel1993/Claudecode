@@ -24,6 +24,8 @@ import { CareerLegendProfile } from './CareerLegendProfile';
 import { EndSeasonModal } from './EndSeasonModal';
 import { ApplicationResolutionModal } from './ApplicationResolutionModal';
 import { CareerChampionsHub } from './CareerChampionsHub';
+import { DeleteCareerModal } from './DeleteCareerModal';
+import { CareerHistoryArchiveModal } from './CareerHistoryArchiveModal';
 
 const Panel = ({ children, className = '' }) => (
   <div className={`bg-slate-900/40 backdrop-blur-md rounded-[2rem] border border-white/10 shadow-lg ${className}`}>
@@ -145,11 +147,12 @@ const buildNews = ({
 };
 
 /* ============================ SELECCIÓN DE CLUB ============================ */
-export const CareerSelectView = ({ candidates, leagueName, onBack, onStart, ui }) => {
+export const CareerSelectView = ({ candidates, leagueName, onBack, onStart, pastCareers = [], onDeletePastCareer, ui }) => {
   const { Shield } = ui;
   const [teamId, setTeamId] = useState(candidates?.[0]?.id ?? null);
   const [manager, setManager] = useState('');
   const [confirming, setConfirming] = useState(false);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
   const selected = (candidates || []).find(t => t.id === teamId);
 
   const selectedObjectives = useMemo(() => {
@@ -166,12 +169,24 @@ export const CareerSelectView = ({ candidates, leagueName, onBack, onStart, ui }
 
   return (
     <div className='flex-grow px-4 pb-20'>
-      <div className='flex items-center gap-3 py-6'>
-        <button onClick={onBack} className='p-2 bg-slate-900/30 backdrop-blur-md rounded-xl active:scale-95 transition-all border border-white/10'><ChevronLeft /></button>
-        <div>
-          <h2 className='text-xl font-black italic uppercase drop-shadow-md'>Modo Carrera</h2>
-          <p className='text-[9px] font-bold uppercase tracking-widest text-amber-400'>Elige tu proyecto</p>
+      <div className='flex items-center justify-between py-6'>
+        <div className='flex items-center gap-3'>
+          <button onClick={onBack} className='p-2 bg-slate-900/30 backdrop-blur-md rounded-xl active:scale-95 transition-all border border-white/10'><ChevronLeft /></button>
+          <div>
+            <h2 className='text-xl font-black italic uppercase drop-shadow-md'>Modo Carrera</h2>
+            <p className='text-[9px] font-bold uppercase tracking-widest text-amber-400'>Elige tu proyecto</p>
+          </div>
         </div>
+
+        {pastCareers && pastCareers.length > 0 && (
+          <button
+            onClick={() => setShowArchiveModal(true)}
+            className='bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 rounded-2xl px-3 py-2 text-[9px] font-black uppercase tracking-wider text-amber-300 flex items-center gap-1.5 active:scale-95 transition-all shadow-md'
+          >
+            <Trophy size={14} className='text-amber-400' />
+            Historial ({pastCareers.length})
+          </button>
+        )}
       </div>
 
       <Panel className='p-5 mb-5'>
@@ -271,6 +286,14 @@ export const CareerSelectView = ({ candidates, leagueName, onBack, onStart, ui }
           />
         )}
       </AnimatePresence>
+
+      <CareerHistoryArchiveModal
+        isOpen={showArchiveModal}
+        onClose={() => setShowArchiveModal(false)}
+        pastCareers={pastCareers}
+        onDeletePastCareer={onDeletePastCareer}
+        ui={ui}
+      />
     </div>
   );
 };
@@ -338,7 +361,8 @@ export const CareerView = ({
   onApplyTrainingStats, onApplyDrillResult, onAcceptOffer, onRejectOffer, onSubmitApplication,
   onAdvanceOfficeWeek, onDecideLaterAppOffer, onRejectAppResolution, onDismissAppResolutionModal,
   onDismissSimulationFeedback, allComps, schedule, clComp, onPlayChampionsMatch,
-  onSimulateChampionsMatch, onSimulateAllChampions, ui
+  onSimulateChampionsMatch, onSimulateAllChampions, onDeleteCareer, onArchiveAndResetCareer,
+  pastCareers = [], onDeletePastCareer, ui
 }) => {
   const { Shield, FormBadges, DieIcon } = ui;
   const [tab, setTab] = useState('main');
@@ -348,6 +372,8 @@ export const CareerView = ({
   const [showDrillModal, setShowDrillModal] = useState(false);
   const [showLegendModal, setShowLegendModal] = useState(false);
   const [showEndSeasonModal, setShowEndSeasonModal] = useState(false);
+  const [showDeleteCareerModal, setShowDeleteCareerModal] = useState(false);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
   const [pendingSigningOffer, setPendingSigningOffer] = useState(null);
   const [submissionModal, setSubmissionModal] = useState(null);
   const [calendarFilter, setCalendarFilter] = useState('TODOS');
@@ -2710,6 +2736,9 @@ export const CareerView = ({
               team={team}
               ui={ui}
               isModal={false}
+              onOpenArchiveModal={() => setShowArchiveModal(true)}
+              onOpenDeleteCareerModal={() => setShowDeleteCareerModal(true)}
+              pastCareersCount={pastCareers?.length || 0}
             />
           )}
         </motion.div>
@@ -2724,6 +2753,15 @@ export const CareerView = ({
             onClose={() => setShowLegendModal(false)}
             ui={ui}
             isModal={true}
+            onOpenArchiveModal={() => {
+              setShowLegendModal(false);
+              setShowArchiveModal(true);
+            }}
+            onOpenDeleteCareerModal={() => {
+              setShowLegendModal(false);
+              setShowDeleteCareerModal(true);
+            }}
+            pastCareersCount={pastCareers?.length || 0}
           />
         )}
       </AnimatePresence>
@@ -2875,6 +2913,32 @@ export const CareerView = ({
         career={career}
         team={team}
         onApplyDrillResult={onApplyDrillResult}
+        ui={ui}
+      />
+
+      {/* MODAL DE HISTORIAL DE CARRERAS FINALIZADAS */}
+      <CareerHistoryArchiveModal
+        isOpen={showArchiveModal}
+        onClose={() => setShowArchiveModal(false)}
+        pastCareers={pastCareers}
+        onDeletePastCareer={onDeletePastCareer}
+        ui={ui}
+      />
+
+      {/* MODAL DE ELIMINACIÓN / REINICIO DE PROYECTO */}
+      <DeleteCareerModal
+        isOpen={showDeleteCareerModal}
+        onClose={() => setShowDeleteCareerModal(false)}
+        career={career}
+        team={team}
+        onArchiveAndReset={() => {
+          setShowDeleteCareerModal(false);
+          onArchiveAndResetCareer && onArchiveAndResetCareer();
+        }}
+        onHardDelete={() => {
+          setShowDeleteCareerModal(false);
+          onDeleteCareer && onDeleteCareer();
+        }}
         ui={ui}
       />
     </div>

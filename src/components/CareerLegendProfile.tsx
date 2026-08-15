@@ -1,6 +1,6 @@
 import React from 'react';
-import { motion } from 'framer-motion';
-import { Trophy, Award, TrendingUp, CheckCircle, Flame, ChevronRight, X, Star, Calendar, Shield as ShieldIcon, Sparkles, Target } from 'lucide-react';
+import { motion } from 'motion/react';
+import { Trophy, Award, TrendingUp, CheckCircle, Flame, ChevronRight, X, Star, Calendar, Shield as ShieldIcon, Sparkles, Target, Trash2, Archive } from 'lucide-react';
 import { repBand, REPUTATION_BANDS } from '../lib/career';
 
 interface CareerLegendProfileProps {
@@ -9,6 +9,9 @@ interface CareerLegendProfileProps {
   onClose?: () => void;
   ui: any;
   isModal?: boolean;
+  onOpenArchiveModal?: () => void;
+  onOpenDeleteCareerModal?: () => void;
+  pastCareersCount?: number;
 }
 
 export const CareerLegendProfile: React.FC<CareerLegendProfileProps> = ({
@@ -16,7 +19,10 @@ export const CareerLegendProfile: React.FC<CareerLegendProfileProps> = ({
   team,
   onClose,
   ui,
-  isModal = false
+  isModal = false,
+  onOpenArchiveModal,
+  onOpenDeleteCareerModal,
+  pastCareersCount = 0
 }) => {
   const { Shield } = ui || {};
 
@@ -89,12 +95,36 @@ export const CareerLegendProfile: React.FC<CareerLegendProfileProps> = ({
             </div>
           </div>
 
-          {onClose && isModal && (
+          <div className="flex items-center gap-1.5">
+            {onClose && isModal && (
+              <button
+                onClick={onClose}
+                className="p-2 rounded-xl bg-slate-800/80 text-slate-300 hover:text-white border border-white/10 active:scale-95 transition-all"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ACCIONES DE PROYECTO: HISTORIAL DE CARRERAS & ELIMINAR / REINICIAR */}
+        <div className="mt-4 flex items-center gap-2 flex-wrap pt-3 border-t border-white/10">
+          {onOpenArchiveModal && (
             <button
-              onClick={onClose}
-              className="p-2 rounded-xl bg-slate-800/80 text-slate-300 hover:text-white border border-white/10 active:scale-95 transition-all"
+              onClick={onOpenArchiveModal}
+              className="flex-1 bg-gradient-to-r from-amber-500/20 to-yellow-500/10 hover:from-amber-500/30 hover:to-yellow-500/20 border border-amber-500/40 rounded-xl px-3 py-2 text-[9px] font-black uppercase tracking-wider text-amber-300 flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow-sm"
             >
-              <X size={16} />
+              <Archive size={13} /> Historial de Carreras Finalizadas {pastCareersCount > 0 && `(${pastCareersCount})`}
+            </button>
+          )}
+
+          {onOpenDeleteCareerModal && (
+            <button
+              onClick={onOpenDeleteCareerModal}
+              className="bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 rounded-xl px-3 py-2 text-[9px] font-black uppercase tracking-wider text-red-300 flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow-sm"
+              title="Eliminar o archivar proyecto de carrera actual"
+            >
+              <Trash2 size={13} /> Eliminar Proyecto
             </button>
           )}
         </div>

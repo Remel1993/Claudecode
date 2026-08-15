@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { Trophy, Dices, Zap, Shield as ShieldIcon, ChevronRight, Calendar, Award, CheckCircle2, XCircle, Clock, Sparkles, Layers, ArrowLeft, RotateCcw, ShieldCheck, Dumbbell, Target } from 'lucide-react';
+import { Trophy, Dices, Zap, Shield as ShieldIcon, ChevronRight, Calendar, Award, CheckCircle, CheckCircle2, XCircle, Clock, Sparkles, Layers, ArrowLeft, RotateCcw, ShieldCheck, Dumbbell, Target } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clPhaseLabel, getChampionsObjectiveTarget, CL_PHASE_ORDER, tacticalOptions, sameDist } from '../lib/career';
+import { sanitizeChampionsBracket } from '../lib/championsSanitizer';
 
 interface CareerChampionsHubProps {
   career: any;
@@ -48,6 +49,11 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
   const phase = clComp?.phase || 'groups';
   const matchday = clComp?.matchday || 0;
   const isFinished = clComp?.showWinner || phase === 'Terminado';
+
+  // Bracket seguro y auto-reparado con formato oficial UEFA (ida y vuelta en Octavos/Cuartos/Semis, partido único en Final)
+  const safeBracket = useMemo(() => {
+    return sanitizeChampionsBracket(clComp?.bracket, clComp?.teams) || clComp?.bracket;
+  }, [clComp?.bracket, clComp?.teams]);
 
   // Base táctica y opciones
   const baseTactic = useMemo(() => ({
@@ -96,8 +102,8 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
           const isKnockout = ['Octavos', 'Cuartos', 'Semis'].some(p => (h.day || '').includes(p));
           const phaseKey = ['Octavos', 'Cuartos', 'Semis'].find(p => (h.day || '').includes(p));
           
-          if (isKnockout && phaseKey && clComp?.bracket?.[phaseKey]) {
-            const bMatches = Array.isArray(clComp.bracket[phaseKey]) ? clComp.bracket[phaseKey] : [clComp.bracket[phaseKey]];
+          if (isKnockout && phaseKey && safeBracket?.[phaseKey]) {
+            const bMatches = Array.isArray(safeBracket[phaseKey]) ? safeBracket[phaseKey] : [safeBracket[phaseKey]];
             const bMatch = bMatches.find((bm: any) => bm && (bm.hId === careerClTeam?.id || bm.aId === careerClTeam?.id));
             if (bMatch && bMatch.sh !== null) {
               const teamIsHId = bMatch.hId === careerClTeam?.id;
@@ -227,9 +233,9 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
         }
       }
     } else if (['Octavos', 'Cuartos', 'Semis', 'Final'].includes(phase)) {
-      const bracketMatches = Array.isArray(clComp.bracket?.[phase])
-        ? clComp.bracket[phase]
-        : [clComp.bracket?.[phase]].filter(Boolean);
+      const bracketMatches = Array.isArray(safeBracket?.[phase])
+        ? safeBracket[phase]
+        : [safeBracket?.[phase]].filter(Boolean);
 
       const match = bracketMatches.find((m: any) => m && (m.hId === careerClTeam.id || m.aId === careerClTeam.id));
       if (match) {
@@ -266,12 +272,12 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
       }
     }
     return null;
-  }, [clComp, careerClTeam, phase, matchday, userGroup]);
+  }, [clComp, safeBracket, careerClTeam, phase, matchday, userGroup]);
 
   // Determinar si el club fue campeón de Champions
   const isChampion = useMemo(() => {
-    if (!isFinished || !clComp.bracket?.Final?.[0] || !careerClTeam) return false;
-    const finalMatch = clComp.bracket.Final[0];
+    const finalMatch = safeBracket?.Final?.[0] || safeBracket?.Final;
+    if (!isFinished || !finalMatch || !careerClTeam) return false;
     const { hId, aId, sh, sa, penH, penA } = finalMatch;
     if (sh === null || sa === null) return false;
     let winnerId = null;
@@ -279,7 +285,7 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
     else if (sa > sh) winnerId = aId;
     else if (penH !== null && penA !== null) winnerId = penH > penA ? hId : aId;
     return winnerId === careerClTeam.id;
-  }, [isFinished, clComp, careerClTeam]);
+  }, [isFinished, safeBracket, careerClTeam]);
 
   // Determinar si sigue vivo en Champions
   const isAlive = useMemo(() => {
@@ -984,23 +990,34 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
             exit={{ opacity: 0, y: -10 }}
             className='space-y-4'
           >
-            {clComp.bracket ? (
+            {safeBracket ? (
               <div className='flex gap-4 overflow-x-auto pb-4 custom-scrollbar'>
-                {['Octavos', 'Cuartos', 'Semis', 'Final'].filter(p => clComp.bracket[p]).map(p => (
-                  <div key={p} className='min-w-[260px] flex-shrink-0 space-y-2.5'>
-                    <div className='flex items-center justify-between bg-blue-950/40 px-3 py-1.5 rounded-xl border border-blue-500/20'>
-                      <h4 className='text-[10px] font-black uppercase italic text-blue-300'>{clPhaseLabel(p)}</h4>
-                      <span className='text-[8px] font-bold text-slate-400'>{p === 'Final' ? '1 Partido' : 'Ida y Vuelta'}</span>
+                {['Octavos', 'Cuartos', 'Semis', 'Final'].filter(p => safeBracket[p]).map(p => (
+                  <div key={p} className='min-w-[280px] sm:min-w-[310px] flex-shrink-0 space-y-2.5'>
+                    <div className='flex items-center justify-between bg-gradient-to-r from-blue-950 via-slate-900 to-blue-950 px-3.5 py-2 rounded-2xl border border-blue-500/30 shadow-md'>
+                      <div>
+                        <h4 className='text-[11px] font-black uppercase italic text-blue-300'>{clPhaseLabel(p)}</h4>
+                        <span className='text-[8px] font-bold text-slate-400'>{p === 'Final' ? 'Partido Único (Sede Neutral)' : 'Eliminatoria Ida y Vuelta'}</span>
+                      </div>
+                      {p !== 'Final' ? (
+                        <div className='flex items-center gap-2 text-[7.5px] font-black uppercase tracking-wider text-slate-400'>
+                          <span className='w-6 text-center text-slate-300'>Ida</span>
+                          <span className='w-6 text-center text-slate-300'>Vta</span>
+                          <span className='w-8 text-center text-amber-300'>Glob</span>
+                        </div>
+                      ) : (
+                        <span className='text-[8px] font-black uppercase text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30'>Final</span>
+                      )}
                     </div>
 
-                    <div className='space-y-2'>
-                      {(Array.isArray(clComp.bracket[p]) ? clComp.bracket[p] : [clComp.bracket[p]]).filter(Boolean).map((m: any, mi: number) => {
+                    <div className='space-y-2.5'>
+                      {(Array.isArray(safeBracket[p]) ? safeBracket[p] : [safeBracket[p]]).filter(Boolean).map((m: any, mi: number) => {
                         const h = clComp.teams.find((t: any) => t.id === m.hId);
                         const a = clComp.teams.find((t: any) => t.id === m.aId);
                         const isMyMatch = m.hId === careerClTeam?.id || m.aId === careerClTeam?.id;
 
                         let winner = null;
-                        if (p !== 'Final' ? m.sh2 !== null && m.sh2 !== undefined : m.sh !== null) {
+                        if (p !== 'Final' ? (m.sh2 !== null && m.sh2 !== undefined) : (m.sh !== null && m.sh !== undefined)) {
                           if (p !== 'Final') {
                             const totH = (m.sh || 0) + (m.sh2 || 0);
                             const totA = (m.sa || 0) + (m.sa2 || 0);
@@ -1015,7 +1032,7 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                         }
 
                         const isTwoLegged = p !== 'Final';
-                        const hasIda = m.sh !== null && m.sa !== null;
+                        const hasIda = m.sh !== null && m.sh !== undefined && m.sa !== null && m.sa !== undefined;
                         const hasVuelta = isTwoLegged && m.sh2 !== null && m.sh2 !== undefined && m.sa2 !== null && m.sa2 !== undefined;
                         const totH = (m.sh || 0) + (m.sh2 || 0);
                         const totA = (m.sa || 0) + (m.sa2 || 0);
@@ -1023,99 +1040,185 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                         return (
                           <div
                             key={mi}
-                            className={`rounded-2xl p-3 border transition-all space-y-2 ${
+                            className={`rounded-2xl p-3.5 border transition-all space-y-2 shadow-lg ${
                               isMyMatch
-                                ? 'bg-blue-950/70 border-blue-400/60 shadow-lg ring-1 ring-blue-500/20'
-                                : 'bg-slate-900/80 border-white/5'
+                                ? 'bg-gradient-to-br from-blue-950/90 via-slate-900/95 to-indigo-950/80 border-blue-400/70 shadow-blue-500/10 ring-1 ring-blue-500/30'
+                                : 'bg-slate-900/85 border-white/10'
                             }`}
                           >
-                            {/* Cabecera del Cruce: Estado de la Eliminatoria */}
-                            {isTwoLegged && (
-                              <div className='flex items-center justify-between text-[7.5px] font-black uppercase tracking-wider pb-1 border-b border-white/5'>
-                                <span className={hasVuelta ? 'text-emerald-400' : hasIda ? 'text-amber-400' : 'text-slate-400'}>
-                                  {hasVuelta ? 'Eliminatoria Finalizada' : hasIda ? 'Ida Disputada · Vuelta Pendiente' : 'Ida y Vuelta'}
-                                </span>
-                                {hasVuelta && (
-                                  <span className='bg-blue-500/20 text-blue-300 px-2 py-0.2 rounded-full border border-blue-500/30'>
-                                    Global: {totH} - {totA}
+                            {/* Cabecera del Cruce */}
+                            <div className='flex items-center justify-between text-[8px] font-black uppercase tracking-wider pb-1.5 border-b border-white/5'>
+                              <div className='flex items-center gap-1.5'>
+                                <span className='text-slate-400'>Llave {mi + 1}</span>
+                                {isMyMatch && (
+                                  <span className='px-1.5 py-0.2 rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/40 text-[7px]'>
+                                    Tu Partido
                                   </span>
                                 )}
                               </div>
-                            )}
 
-                            {/* Fila Equipo 1 (Local en Ida) */}
+                              {isTwoLegged ? (
+                                <span className={`px-2 py-0.5 rounded-full text-[7.5px] font-bold ${
+                                  hasVuelta
+                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                    : hasIda
+                                    ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                                    : 'bg-slate-800 text-slate-400 border border-white/10'
+                                }`}>
+                                  {hasVuelta ? `Global: ${totH} - ${totA}` : hasIda ? 'Ida disputada' : 'Por disputar'}
+                                </span>
+                              ) : (
+                                <span className={`px-2 py-0.5 rounded-full text-[7.5px] font-bold ${
+                                  m.sh !== null ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-slate-800 text-slate-400'
+                                }`}>
+                                  {m.sh !== null ? `Resultado: ${m.sh} - ${m.sa}` : 'Por disputar'}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Fila Equipo 1 (Local en Ida / Equipo A) */}
                             <div className='flex justify-between items-center py-1'>
-                              <div className='flex items-center gap-2 flex-1 truncate'>
+                              <div className='flex items-center gap-2 flex-1 min-w-0 pr-2'>
                                 <Shield color1={h?.color1} color2={h?.color2} initial={h?.name} size='xs' isFlag={h?.isFlag} />
-                                <span className={`text-[9px] font-bold uppercase italic truncate ${h?.id === careerClTeam?.id ? 'text-blue-300 font-black' : h ? 'text-white' : 'text-slate-500'}`}>
+                                <span className={`text-[10px] font-black uppercase italic truncate ${
+                                  winner?.id === h?.id
+                                    ? 'text-yellow-300'
+                                    : h?.id === careerClTeam?.id
+                                    ? 'text-blue-300'
+                                    : h
+                                    ? 'text-white'
+                                    : 'text-slate-500'
+                                }`}>
                                   {h?.name || 'Por Definir'}
                                 </span>
                               </div>
-                              <div className='flex items-center gap-1.5 tabular-nums text-[9px]'>
-                                {hasIda && (
-                                  <span className='bg-black/40 text-slate-300 px-1.5 py-0.5 rounded font-bold' title='Partido de Ida'>
-                                    {m.sh}
+
+                              {isTwoLegged ? (
+                                <div className='flex items-center gap-2 tabular-nums text-[10px] shrink-0'>
+                                  {/* Ida */}
+                                  <span className={`w-6 text-center py-0.5 rounded font-extrabold ${
+                                    hasIda ? 'bg-black/50 text-slate-200 border border-white/5' : 'text-slate-600'
+                                  }`} title='Goles en Ida'>
+                                    {hasIda ? m.sh : '—'}
                                   </span>
-                                )}
-                                {hasVuelta && (
-                                  <span className='bg-black/40 text-slate-300 px-1.5 py-0.5 rounded font-bold' title='Partido de Vuelta'>
-                                    {m.sh2}
+
+                                  {/* Vuelta */}
+                                  <span className={`w-6 text-center py-0.5 rounded font-extrabold ${
+                                    hasVuelta ? 'bg-black/50 text-slate-200 border border-white/5' : 'text-slate-600'
+                                  }`} title='Goles en Vuelta'>
+                                    {hasVuelta ? m.sh2 : '—'}
                                   </span>
-                                )}
-                                {hasVuelta && (
-                                  <span className='bg-blue-600 text-white font-black px-2 py-0.5 rounded shadow-sm' title='Marcador Global'>
-                                    {totH}
+
+                                  {/* Global */}
+                                  <span className={`w-8 text-center py-0.5 rounded-lg font-black shadow-sm ${
+                                    hasVuelta
+                                      ? (winner?.id === h?.id ? 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-black' : 'bg-blue-900/60 text-blue-200 border border-blue-500/30')
+                                      : 'text-slate-600'
+                                  }`} title='Marcador Global Acumulado'>
+                                    {hasVuelta ? totH : '—'}
                                   </span>
-                                )}
-                                {!hasIda && !isTwoLegged && m.sh !== null && (
-                                  <span className='bg-blue-600 text-white font-black px-2 py-0.5 rounded'>{m.sh}</span>
-                                )}
-                                {m.penH !== null && m.penH !== undefined && (
-                                  <span className='text-amber-300 text-[8px] font-black'>[{m.penH}]</span>
-                                )}
-                              </div>
+
+                                  {/* Penaltis si hubo */}
+                                  {hasVuelta && m.penH !== null && m.penH !== undefined && (
+                                    <span className='text-amber-400 text-[8px] font-black bg-amber-500/20 px-1 py-0.5 rounded border border-amber-500/30'>
+                                      ({m.penH})
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className='flex items-center gap-1.5 tabular-nums text-[11px] shrink-0'>
+                                  <span className={`px-2.5 py-0.5 rounded-lg font-black ${
+                                    m.sh !== null
+                                      ? (winner?.id === h?.id ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-white border border-white/10')
+                                      : 'text-slate-600'
+                                  }`}>
+                                    {m.sh !== null ? m.sh : '—'}
+                                  </span>
+                                  {m.penH !== null && m.penH !== undefined && (
+                                    <span className='text-amber-400 text-[8px] font-black bg-amber-500/20 px-1.5 py-0.5 rounded'>
+                                      ({m.penH} pen.)
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </div>
 
-                            {/* Fila Equipo 2 (Visitante en Ida) */}
+                            {/* Fila Equipo 2 (Visitante en Ida / Equipo B) */}
                             <div className='flex justify-between items-center py-1 border-t border-white/5'>
-                              <div className='flex items-center gap-2 flex-1 truncate'>
+                              <div className='flex items-center gap-2 flex-1 min-w-0 pr-2'>
                                 <Shield color1={a?.color1} color2={a?.color2} initial={a?.name} size='xs' isFlag={a?.isFlag} />
-                                <span className={`text-[9px] font-bold uppercase italic truncate ${a?.id === careerClTeam?.id ? 'text-blue-300 font-black' : a ? 'text-white' : 'text-slate-500'}`}>
+                                <span className={`text-[10px] font-black uppercase italic truncate ${
+                                  winner?.id === a?.id
+                                    ? 'text-yellow-300'
+                                    : a?.id === careerClTeam?.id
+                                    ? 'text-blue-300'
+                                    : a
+                                    ? 'text-white'
+                                    : 'text-slate-500'
+                                }`}>
                                   {a?.name || 'Por Definir'}
                                 </span>
                               </div>
-                              <div className='flex items-center gap-1.5 tabular-nums text-[9px]'>
-                                {hasIda && (
-                                  <span className='bg-black/40 text-slate-300 px-1.5 py-0.5 rounded font-bold' title='Partido de Ida'>
-                                    {m.sa}
+
+                              {isTwoLegged ? (
+                                <div className='flex items-center gap-2 tabular-nums text-[10px] shrink-0'>
+                                  {/* Ida */}
+                                  <span className={`w-6 text-center py-0.5 rounded font-extrabold ${
+                                    hasIda ? 'bg-black/50 text-slate-200 border border-white/5' : 'text-slate-600'
+                                  }`} title='Goles en Ida'>
+                                    {hasIda ? m.sa : '—'}
                                   </span>
-                                )}
-                                {hasVuelta && (
-                                  <span className='bg-black/40 text-slate-300 px-1.5 py-0.5 rounded font-bold' title='Partido de Vuelta'>
-                                    {m.sa2}
+
+                                  {/* Vuelta */}
+                                  <span className={`w-6 text-center py-0.5 rounded font-extrabold ${
+                                    hasVuelta ? 'bg-black/50 text-slate-200 border border-white/5' : 'text-slate-600'
+                                  }`} title='Goles en Vuelta'>
+                                    {hasVuelta ? m.sa2 : '—'}
                                   </span>
-                                )}
-                                {hasVuelta && (
-                                  <span className='bg-blue-600 text-white font-black px-2 py-0.5 rounded shadow-sm' title='Marcador Global'>
-                                    {totA}
+
+                                  {/* Global */}
+                                  <span className={`w-8 text-center py-0.5 rounded-lg font-black shadow-sm ${
+                                    hasVuelta
+                                      ? (winner?.id === a?.id ? 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-black' : 'bg-blue-900/60 text-blue-200 border border-blue-500/30')
+                                      : 'text-slate-600'
+                                  }`} title='Marcador Global Acumulado'>
+                                    {hasVuelta ? totA : '—'}
                                   </span>
-                                )}
-                                {!hasIda && !isTwoLegged && m.sa !== null && (
-                                  <span className='bg-blue-600 text-white font-black px-2 py-0.5 rounded'>{m.sa}</span>
-                                )}
-                                {m.penA !== null && m.penA !== undefined && (
-                                  <span className='text-amber-300 text-[8px] font-black'>[{m.penA}]</span>
-                                )}
-                              </div>
+
+                                  {/* Penaltis si hubo */}
+                                  {hasVuelta && m.penA !== null && m.penA !== undefined && (
+                                    <span className='text-amber-400 text-[8px] font-black bg-amber-500/20 px-1 py-0.5 rounded border border-amber-500/30'>
+                                      ({m.penA})
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className='flex items-center gap-1.5 tabular-nums text-[11px] shrink-0'>
+                                  <span className={`px-2.5 py-0.5 rounded-lg font-black ${
+                                    m.sa !== null
+                                      ? (winner?.id === a?.id ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-white border border-white/10')
+                                      : 'text-slate-600'
+                                  }`}>
+                                    {m.sa !== null ? m.sa : '—'}
+                                  </span>
+                                  {m.penA !== null && m.penA !== undefined && (
+                                    <span className='text-amber-400 text-[8px] font-black bg-amber-500/20 px-1.5 py-0.5 rounded'>
+                                      ({m.penA} pen.)
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </div>
 
-                            {/* Ganador / Clasificado */}
-                            {winner && (
-                              <div className='mt-1 pt-1.5 border-t border-white/5 flex items-center justify-between text-[8px] font-black uppercase text-emerald-400'>
-                                <span>{p === 'Final' ? '🏆 Campeón:' : 'Pasa de Ronda:'}</span>
-                                <span className='truncate font-black text-white max-w-[130px]'>{winner.name}</span>
+                            {/* Resumen del Ganador / Clasificado */}
+                            {winner ? (
+                              <div className='mt-1 pt-1.5 border-t border-white/5 flex items-center justify-between text-[8px] font-black uppercase'>
+                                <span className='text-emerald-400 flex items-center gap-1'>
+                                  <CheckCircle size={10} /> {p === 'Final' ? '🏆 Campeón:' : 'Pasa:'}
+                                </span>
+                                <span className='truncate font-black text-amber-300 max-w-[150px]'>{winner.name}</span>
                               </div>
-                            )}
+                            ) : null}
                           </div>
                         );
                       })}
