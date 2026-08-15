@@ -589,6 +589,7 @@ export const seasonObjectives = ({
     });
   } else if (div === 1 && tier >= 3) {
     const isClSpot = played > 0 && !!position && position <= CL_SPOTS;
+    const isFailed = played >= rounds && !isClSpot;
     items.push({
       key: 'championsSpot',
       category: 'Continental',
@@ -600,8 +601,8 @@ export const seasonObjectives = ({
       progress: !played || !position ? 40 : Math.max(0, Math.min(100, Math.round(((size - position + 1) / (size - CL_SPOTS + 1)) * 100))),
       currentValue: played && position ? `${position}º` : '—',
       targetValue: `Top ${CL_SPOTS}`,
-      status: isClSpot ? 'on_track' : played >= rounds ? 'failed' : 'at_risk',
-      statusLabel: isClSpot ? 'En Champions' : 'Fuera de Zona'
+      status: isClSpot ? 'on_track' : isFailed ? 'failed' : 'at_risk',
+      statusLabel: isClSpot ? 'En Champions' : isFailed ? 'No Clasificado' : 'Fuera de Zona'
     });
   }
 
@@ -1503,4 +1504,38 @@ export const DEFAULT_CAREER = {
   // Postulación activa en mercado (máximo 1 activa, 2 semanas en revisión a ciegas)
   activeApplication: null,
   applicationHistory: []
+};
+
+/**
+ * Generador determinista y canónico del calendario de liga / fase de grupos.
+ */
+export const generateLeagueSchedule = (teams: any[], twoLegged: boolean = true) => {
+  if (!Array.isArray(teams)) return [];
+  const n = teams.length;
+  if (n % 2 !== 0) return [];
+  const teamIds = teams.map(t => t.id);
+  const rounds: any[] = [];
+  const totalRounds = twoLegged ? (n - 1) * 2 : (n - 1);
+
+  for (let j = 0; j < totalRounds; j++) {
+    const round: any[] = [];
+    const isReturn = j >= (n - 1);
+    const r = isReturn ? j - (n - 1) : j;
+
+    for (let i = 0; i < n / 2; i++) {
+      const home = i === 0 ? teamIds[n - 1] : teamIds[(r + i) % (n - 1)];
+      const away = teamIds[(n - 1 - i + r) % (n - 1)];
+      if (isReturn) round.push({ homeId: away, awayId: home });
+      else round.push({ homeId: home, awayId: away });
+    }
+    rounds.push(round);
+  }
+  return rounds;
+};
+
+/**
+ * Generador de clave única para una jornada / eliminatoria de Champions League
+ */
+export const getChampionsMatchKey = (season: number = 1, phase: string = 'groups', matchday: number = 0) => {
+  return `cl-${season}-${phase}-${matchday}`;
 };
