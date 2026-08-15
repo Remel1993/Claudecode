@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Trophy, Dices, Zap, Shield as ShieldIcon, ChevronRight, Calendar, Award, CheckCircle, CheckCircle2, XCircle, Clock, Sparkles, Layers, ArrowLeft, RotateCcw, ShieldCheck, Dumbbell, Target } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { clPhaseLabel, getChampionsObjectiveTarget, CL_PHASE_ORDER, tacticalOptions, sameDist } from '../lib/career';
+import { clPhaseLabel, getChampionsObjectiveTarget, CL_PHASE_ORDER, tacticalOptions, sameDist, generateLeagueSchedule, getChampionsMatchKey } from '../lib/career';
 import { sanitizeChampionsBracket } from '../lib/championsSanitizer';
 
 interface CareerChampionsHubProps {
@@ -61,6 +61,17 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
     opp: career.baseDist?.opp || team?.opp || 3,
     def: career.baseDist?.def || team?.def || 3
   }), [career.baseDist, team]);
+
+  const effectiveTactic = useMemo(() => {
+    const tactic = career.tactic ? { ...career.tactic } : { ...baseTactic };
+    if (career.activeInjury) {
+      const attr = career.activeInjury.attr as 'att' | 'opp' | 'def';
+      if (attr) {
+        tactic[attr] = Math.max(1, (tactic[attr] || 1) - 1);
+      }
+    }
+    return tactic;
+  }, [career.tactic, baseTactic, career.activeInjury]);
 
   const totalTeamStrength = baseTactic.att + baseTactic.opp + baseTactic.def;
   const currentTier = career?.tier || team?.tier || 1;
@@ -195,42 +206,26 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
     if (phase === 'groups') {
       if (!userGroup) return null;
       const groupTeams = (clComp.teams || []).filter((t: any) => userGroup.teamIds?.includes(t.id));
+      const schedule = generateLeagueSchedule(groupTeams, true);
       const roundIdx = matchday % 6;
-      // Generar calendario de grupo de 4 equipos
-      const n = groupTeams.length;
-      if (n === 4) {
-        const teamIds = groupTeams.map((t: any) => t.id);
-        const rounds: any[] = [];
-        for (let j = 0; j < 6; j++) {
-          const round: any[] = [];
-          const isReturn = j >= 3;
-          const r = isReturn ? j - 3 : j;
-          for (let i = 0; i < 2; i++) {
-            const home = i === 0 ? teamIds[3] : teamIds[(r + i) % 3];
-            const away = teamIds[(3 - 1 - i + r) % 3];
-            round.push(isReturn ? { homeId: away, awayId: home } : { homeId: home, awayId: away });
-          }
-          rounds.push(round);
-        }
-        const currentRound = rounds[roundIdx] || [];
-        const match = currentRound.find((m: any) => m.homeId === careerClTeam.id || m.awayId === careerClTeam.id);
-        if (match) {
-          const home = clComp.teams.find((t: any) => t.id === match.homeId);
-          const away = clComp.teams.find((t: any) => t.id === match.awayId);
-          const isHome = match.homeId === careerClTeam.id;
-          const rival = isHome ? away : home;
-          return {
-            match,
-            home,
-            away,
-            isHome,
-            rival,
-            phaseLabel: `Fase de Grupos · Jornada ${roundIdx + 1} de 6`,
-            groupName: userGroup.name,
-            isVuelta: false,
-            aggregate: null
-          };
-        }
+      const currentRound = schedule[roundIdx] || [];
+      const match = currentRound.find((m: any) => m.homeId === careerClTeam.id || m.awayId === careerClTeam.id);
+      if (match) {
+        const rawHome = clComp.teams.find((t: any) => t.id === match.homeId);
+        const rawAway = clComp.teams.find((t: any) => t.id === match.awayId);
+        const isHome = match.homeId === careerClTeam.id;
+        const rival = isHome ? rawAway : rawHome;
+        return {
+          match,
+          home: rawHome,
+          away: rawAway,
+          isHome,
+          rival,
+          phaseLabel: `Fase de Grupos · Jornada ${roundIdx + 1} de 6`,
+          groupName: userGroup.name,
+          isVuelta: false,
+          aggregate: null
+        };
       }
     } else if (['Octavos', 'Cuartos', 'Semis', 'Final'].includes(phase)) {
       const bracketMatches = Array.isArray(safeBracket?.[phase])
@@ -242,10 +237,10 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
         const isVuelta = matchday % 2 !== 0 && phase !== 'Final';
         const homeId = isVuelta ? match.aId : match.hId;
         const awayId = isVuelta ? match.hId : match.aId;
-        const home = clComp.teams.find((t: any) => t.id === homeId);
-        const away = clComp.teams.find((t: any) => t.id === awayId);
+        const rawHome = clComp.teams.find((t: any) => t.id === homeId);
+        const rawAway = clComp.teams.find((t: any) => t.id === awayId);
         const isHome = homeId === careerClTeam.id;
-        const rival = isHome ? away : home;
+        const rival = isHome ? rawAway : rawHome;
 
         let aggregate = null;
         if (isVuelta && match.sh !== null && match.sa !== null) {
@@ -260,8 +255,8 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
         const legText = phase === 'Final' ? 'Gran Final (Partido Único)' : isVuelta ? 'Vuelta' : 'Ida';
         return {
           match,
-          home,
-          away,
+          home: rawHome,
+          away: rawAway,
           isHome,
           rival,
           phaseLabel: `${clPhaseLabel(phase)} · ${legText}`,
@@ -274,8 +269,29 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
     return null;
   }, [clComp, safeBracket, careerClTeam, phase, matchday, userGroup]);
 
+  // Determinar si el club no clasificó a Champions esta temporada
+  const isNotQualified = useMemo(() => {
+    if (careerClTeam) return false;
+    if (career.clQualified) return false;
+    if (clInfo && !clInfo.notQualified) return false;
+    return true;
+  }, [careerClTeam, career.clQualified, clInfo]);
+
+  // Clave de partido de Champions League para independizar entrenamiento
+  const clMatchKey = useMemo(() => {
+    const s = career.season || career.clSeason || clComp?.season || 1;
+    const p = clComp?.phase || 'groups';
+    const md = clComp?.matchday || 0;
+    return getChampionsMatchKey(s, p, md);
+  }, [career.season, career.clSeason, clComp?.phase, clComp?.matchday, clComp?.season]);
+
+  const hasTrainedThisClMatch = useMemo(() => {
+    return career.trainedMatchKey === clMatchKey || career.trainedClMatchKey === clMatchKey;
+  }, [career.trainedMatchKey, career.trainedClMatchKey, clMatchKey]);
+
   // Determinar si el club fue campeón de Champions
   const isChampion = useMemo(() => {
+    if (isNotQualified) return false;
     const finalMatch = safeBracket?.Final?.[0] || safeBracket?.Final;
     if (!isFinished || !finalMatch || !careerClTeam) return false;
     const { hId, aId, sh, sa, penH, penA } = finalMatch;
@@ -285,15 +301,16 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
     else if (sa > sh) winnerId = aId;
     else if (penH !== null && penA !== null) winnerId = penH > penA ? hId : aId;
     return winnerId === careerClTeam.id;
-  }, [isFinished, safeBracket, careerClTeam]);
+  }, [isNotQualified, isFinished, safeBracket, careerClTeam]);
 
   // Determinar si sigue vivo en Champions
   const isAlive = useMemo(() => {
+    if (isNotQualified) return false;
     if (isFinished) return false;
     if (!careerClTeam) return false;
     if (phase === 'groups') return true;
     return !!currentMatchData?.match;
-  }, [isFinished, careerClTeam, phase, currentMatchData]);
+  }, [isNotQualified, isFinished, careerClTeam, phase, currentMatchData]);
 
   // Objetivo continental
   const clObjective = useMemo(() => {
@@ -305,7 +322,12 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
     let status: 'completed' | 'on_track' | 'at_risk' | 'failed' = 'on_track';
     let statusLabel = 'En Carrera';
 
-    if (isChampion) {
+    if (isNotQualified) {
+      done = false;
+      progress = 0;
+      status = 'failed';
+      statusLabel = 'No Clasificado';
+    } else if (isChampion) {
       done = true;
       progress = 100;
       status = 'completed';
@@ -348,7 +370,7 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
     }
 
     return { target, done, progress, status, statusLabel };
-  }, [career.tier, phase, isChampion, isAlive, isFinished]);
+  }, [isNotQualified, career.tier, phase, isChampion, isAlive, isFinished]);
 
   return (
     <div className='space-y-4 text-white'>
@@ -389,6 +411,10 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
               {isChampion ? (
                 <div className='bg-gradient-to-r from-yellow-500 to-amber-500 text-slate-950 font-black text-[9px] uppercase px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 animate-bounce'>
                   <Trophy size={12} /> Campeón 🏆
+                </div>
+              ) : isNotQualified ? (
+                <div className='bg-slate-800/80 text-slate-400 border border-white/10 font-black text-[9px] uppercase px-3 py-1.5 rounded-full flex items-center gap-1.5'>
+                  <XCircle size={11} className='text-slate-400' /> No Clasificado
                 </div>
               ) : isAlive ? (
                 <div className='bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-black text-[9px] uppercase px-3 py-1.5 rounded-full flex items-center gap-1.5'>
@@ -543,14 +569,14 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                 <div className='bg-black/40 rounded-2xl p-3 border border-white/5 flex items-center justify-between gap-2'>
                   <div className='flex items-center gap-2 min-w-0 flex-1'>
                     <Shield
-                      color1={lastPlayedChampionsMatch.home?.color1 || team?.color1}
-                      color2={lastPlayedChampionsMatch.home?.color2 || team?.color2}
-                      initial={lastPlayedChampionsMatch.home?.name || team?.name}
+                      color1={lastPlayedChampionsMatch.isHome ? (team?.color1 || lastPlayedChampionsMatch.home?.color1) : lastPlayedChampionsMatch.home?.color1}
+                      color2={lastPlayedChampionsMatch.isHome ? (team?.color2 || lastPlayedChampionsMatch.home?.color2) : lastPlayedChampionsMatch.home?.color2}
+                      initial={lastPlayedChampionsMatch.isHome ? (team?.name || lastPlayedChampionsMatch.home?.name) : lastPlayedChampionsMatch.home?.name}
                       size='sm'
-                      isFlag={lastPlayedChampionsMatch.home?.isFlag}
+                      isFlag={lastPlayedChampionsMatch.isHome ? (team?.isFlag ?? lastPlayedChampionsMatch.home?.isFlag) : lastPlayedChampionsMatch.home?.isFlag}
                     />
-                    <span className={`text-[10px] font-black uppercase truncate ${lastPlayedChampionsMatch.home?.id === careerClTeam?.id || lastPlayedChampionsMatch.isHome ? 'text-blue-300' : 'text-white'}`}>
-                      {lastPlayedChampionsMatch.home?.name || (lastPlayedChampionsMatch.isHome ? team?.name : lastPlayedChampionsMatch.rivalTeam?.name)}
+                    <span className={`text-[10px] font-black uppercase truncate ${lastPlayedChampionsMatch.isHome ? 'text-blue-300' : 'text-white'}`}>
+                      {lastPlayedChampionsMatch.isHome ? (team?.name || lastPlayedChampionsMatch.home?.name) : (lastPlayedChampionsMatch.home?.name || lastPlayedChampionsMatch.rivalTeam?.name)}
                     </span>
                   </div>
 
@@ -566,15 +592,15 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                   </div>
 
                   <div className='flex items-center justify-end gap-2 min-w-0 flex-1 text-right'>
-                    <span className={`text-[10px] font-black uppercase truncate ${lastPlayedChampionsMatch.away?.id === careerClTeam?.id || !lastPlayedChampionsMatch.isHome ? 'text-blue-300' : 'text-white'}`}>
-                      {lastPlayedChampionsMatch.away?.name || (!lastPlayedChampionsMatch.isHome ? team?.name : lastPlayedChampionsMatch.rivalTeam?.name)}
+                    <span className={`text-[10px] font-black uppercase truncate ${!lastPlayedChampionsMatch.isHome ? 'text-blue-300' : 'text-white'}`}>
+                      {!lastPlayedChampionsMatch.isHome ? (team?.name || lastPlayedChampionsMatch.away?.name) : (lastPlayedChampionsMatch.away?.name || lastPlayedChampionsMatch.rivalTeam?.name)}
                     </span>
                     <Shield
-                      color1={lastPlayedChampionsMatch.away?.color1 || lastPlayedChampionsMatch.rivalTeam?.color1}
-                      color2={lastPlayedChampionsMatch.away?.color2 || lastPlayedChampionsMatch.rivalTeam?.color2}
-                      initial={lastPlayedChampionsMatch.away?.name || lastPlayedChampionsMatch.rivalTeam?.name}
+                      color1={!lastPlayedChampionsMatch.isHome ? (team?.color1 || lastPlayedChampionsMatch.away?.color1) : lastPlayedChampionsMatch.away?.color1}
+                      color2={!lastPlayedChampionsMatch.isHome ? (team?.color2 || lastPlayedChampionsMatch.away?.color2) : lastPlayedChampionsMatch.away?.color2}
+                      initial={!lastPlayedChampionsMatch.isHome ? (team?.name || lastPlayedChampionsMatch.away?.name) : lastPlayedChampionsMatch.away?.name}
                       size='sm'
-                      isFlag={lastPlayedChampionsMatch.away?.isFlag}
+                      isFlag={!lastPlayedChampionsMatch.isHome ? (team?.isFlag ?? lastPlayedChampionsMatch.away?.isFlag) : lastPlayedChampionsMatch.away?.isFlag}
                     />
                   </div>
                 </div>
@@ -660,17 +686,19 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                   {/* Local */}
                   <div className='flex-1 flex flex-col items-center text-center'>
                     <Shield
-                      color1={currentMatchData.home?.color1}
-                      color2={currentMatchData.home?.color2}
-                      initial={currentMatchData.home?.name}
+                      color1={currentMatchData.isHome ? (team?.color1 || currentMatchData.home?.color1) : currentMatchData.home?.color1}
+                      color2={currentMatchData.isHome ? (team?.color2 || currentMatchData.home?.color2) : currentMatchData.home?.color2}
+                      initial={currentMatchData.isHome ? (team?.name || currentMatchData.home?.name) : currentMatchData.home?.name}
                       size='md'
-                      isFlag={currentMatchData.home?.isFlag}
+                      isFlag={currentMatchData.isHome ? (team?.isFlag ?? currentMatchData.home?.isFlag) : currentMatchData.home?.isFlag}
                     />
-                    <h4 className={`text-xs font-black uppercase italic mt-2 truncate w-full ${currentMatchData.home?.id === careerClTeam?.id ? 'text-blue-400' : 'text-white'}`}>
-                      {currentMatchData.home?.name}
+                    <h4 className={`text-xs font-black uppercase italic mt-2 truncate w-full ${currentMatchData.isHome ? 'text-blue-400' : 'text-white'}`}>
+                      {currentMatchData.isHome ? (team?.name || currentMatchData.home?.name) : currentMatchData.home?.name}
                     </h4>
                     <span className='text-[8px] font-bold text-slate-400 bg-white/5 px-2 py-0.5 rounded-full mt-1'>
-                      {currentMatchData.home?.att}/{currentMatchData.home?.opp}/{currentMatchData.home?.def}
+                      {currentMatchData.isHome
+                        ? `${effectiveTactic.att}/${effectiveTactic.opp}/${effectiveTactic.def}`
+                        : `${currentMatchData.home?.att}/${currentMatchData.home?.opp}/${currentMatchData.home?.def}`}
                     </span>
                   </div>
 
@@ -685,17 +713,19 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                   {/* Visitante */}
                   <div className='flex-1 flex flex-col items-center text-center'>
                     <Shield
-                      color1={currentMatchData.away?.color1}
-                      color2={currentMatchData.away?.color2}
-                      initial={currentMatchData.away?.name}
+                      color1={!currentMatchData.isHome ? (team?.color1 || currentMatchData.away?.color1) : currentMatchData.away?.color1}
+                      color2={!currentMatchData.isHome ? (team?.color2 || currentMatchData.away?.color2) : currentMatchData.away?.color2}
+                      initial={!currentMatchData.isHome ? (team?.name || currentMatchData.away?.name) : currentMatchData.away?.name}
                       size='md'
-                      isFlag={currentMatchData.away?.isFlag}
+                      isFlag={!currentMatchData.isHome ? (team?.isFlag ?? currentMatchData.away?.isFlag) : currentMatchData.away?.isFlag}
                     />
-                    <h4 className={`text-xs font-black uppercase italic mt-2 truncate w-full ${currentMatchData.away?.id === careerClTeam?.id ? 'text-blue-400' : 'text-white'}`}>
-                      {currentMatchData.away?.name}
+                    <h4 className={`text-xs font-black uppercase italic mt-2 truncate w-full ${!currentMatchData.isHome ? 'text-blue-400' : 'text-white'}`}>
+                      {!currentMatchData.isHome ? (team?.name || currentMatchData.away?.name) : currentMatchData.away?.name}
                     </h4>
                     <span className='text-[8px] font-bold text-slate-400 bg-white/5 px-2 py-0.5 rounded-full mt-1'>
-                      {currentMatchData.away?.att}/{currentMatchData.away?.opp}/{currentMatchData.away?.def}
+                      {!currentMatchData.isHome
+                        ? `${effectiveTactic.att}/${effectiveTactic.opp}/${effectiveTactic.def}`
+                        : `${currentMatchData.away?.att}/${currentMatchData.away?.opp}/${currentMatchData.away?.def}`}
                     </span>
                   </div>
                 </div>
@@ -721,14 +751,18 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                         <p className='text-[9px] font-black uppercase tracking-widest text-blue-300'>
                           Preparación Europea
                         </p>
-                        {career.medicalImmunityWeeks > 0 && (
-                          <span className='text-[8px] font-black uppercase px-2 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'>
+                        {hasTrainedThisClMatch ? (
+                          <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 flex items-center gap-1'>
+                            <CheckCircle2 size={10} /> Sesión Completada
+                          </span>
+                        ) : career.medicalImmunityWeeks > 0 ? (
+                          <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'>
                             Inmunidad: {career.medicalImmunityWeeks} sem.
                           </span>
-                        )}
+                        ) : null}
                       </div>
                       <p className='text-[9px] font-bold text-slate-300 mt-0.5'>
-                        {career.pe} PE disponibles en tu club
+                        {hasTrainedThisClMatch ? 'Intensidad aplicada a este encuentro' : `${career.pe} PE disponibles en tu club`}
                       </p>
                     </div>
                     {(onOpenDrill || onOpenTraining) && (
@@ -736,9 +770,15 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                         {onOpenDrill && (
                           <button
                             onClick={onOpenDrill}
-                            className='px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[8px] font-black uppercase italic active:scale-95'
+                            disabled={hasTrainedThisClMatch}
+                            className={`px-3 py-1.5 rounded-xl border text-[8px] font-black uppercase italic active:scale-95 transition-all flex items-center gap-1 ${
+                              hasTrainedThisClMatch
+                                ? 'bg-slate-800/60 border-white/10 text-slate-500 cursor-not-allowed opacity-60'
+                                : 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-500/40 text-amber-300'
+                            }`}
                           >
-                            1D6
+                            <Dices size={11} />
+                            {hasTrainedThisClMatch ? 'Hecho' : '1D6'}
                           </button>
                         )}
                         {onOpenTraining && (
@@ -771,6 +811,42 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                     <Zap size={16} className='text-amber-400' />
                     Simular Partido Rápido
                   </button>
+                </div>
+              </div>
+            ) : isNotQualified ? (
+              <div className='bg-slate-900/80 rounded-3xl p-6 text-center space-y-4 border border-white/10 shadow-xl'>
+                <div className='w-14 h-14 rounded-2xl bg-slate-800/80 border border-white/10 flex items-center justify-center mx-auto shadow-inner'>
+                  <XCircle size={32} className='text-slate-400' />
+                </div>
+                <div>
+                  <span className='text-[8px] font-black uppercase tracking-widest text-slate-400 bg-slate-800/80 px-3 py-1 rounded-full border border-white/10'>
+                    No Clasificado
+                  </span>
+                  <h3 className='text-sm font-black uppercase italic text-white mt-2'>
+                    Sin Participación Continental Esta Temporada
+                  </h3>
+                  <p className='text-xs font-bold text-slate-300 max-w-sm mx-auto mt-1 leading-relaxed'>
+                    Tu club no logró la clasificación a la UEFA Champions League para esta temporada. Para acceder a la máxima competición de Europa, debes finalizar entre los 4 primeros (Top 4) en la 1ª División de tu liga nacional.
+                  </p>
+                </div>
+
+                <div className='flex flex-col sm:flex-row gap-2 justify-center pt-2'>
+                  {onSimulateAllChampions && !isFinished && (
+                    <button
+                      onClick={onSimulateAllChampions}
+                      className='bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-5 py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest active:scale-95 transition-all shadow flex items-center justify-center gap-2'
+                    >
+                      <Zap size={14} className='text-yellow-300' /> Simular Torneo Completo
+                    </button>
+                  )}
+                  {onBackToCareer && (
+                    <button
+                      onClick={onBackToCareer}
+                      className='bg-slate-800 hover:bg-slate-700 text-slate-200 px-5 py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest border border-white/10 active:scale-95 transition-all'
+                    >
+                      Volver a la Liga Nacional
+                    </button>
+                  )}
                 </div>
               </div>
             ) : (
@@ -878,9 +954,15 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                 {onOpenDrill && (
                   <button
                     onClick={onOpenDrill}
-                    className='p-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-[9px] font-black uppercase italic tracking-wider border border-white/10 flex items-center justify-center gap-1.5 active:scale-95'
+                    disabled={hasTrainedThisClMatch}
+                    className={`p-3 rounded-2xl text-[9px] font-black uppercase italic tracking-wider border flex items-center justify-center gap-1.5 active:scale-95 transition-all ${
+                      hasTrainedThisClMatch
+                        ? 'bg-slate-800/40 border-white/5 text-slate-500 cursor-not-allowed opacity-60'
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-white/10'
+                    }`}
                   >
-                    <Dices size={14} className='text-amber-400' /> Lanzar Dado de Entreno (1D6)
+                    <Dices size={14} className={hasTrainedThisClMatch ? 'text-slate-500' : 'text-amber-400'} />
+                    {hasTrainedThisClMatch ? 'Sesión Completada (1D6 Hecho)' : 'Lanzar Dado de Entreno (1D6)'}
                   </button>
                 )}
               </div>
@@ -1245,42 +1327,94 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className='space-y-3'
+            className='space-y-4'
           >
             {clComp.history?.length > 0 ? (
-              clComp.history.map((h: any, i: number) => (
-                <div key={i} className='bg-slate-900/80 rounded-2xl p-3 border border-white/5 space-y-2'>
-                  <div className='flex items-center justify-between'>
-                    <span className='text-[10px] font-black uppercase text-blue-300 italic'>{h.day}</span>
-                    <span className='text-[8px] font-bold text-slate-400'>{h.results?.length || 0} partidos</span>
-                  </div>
-                  <div className='grid grid-cols-1 sm:grid-cols-2 gap-1.5'>
-                    {h.results?.map((r: any, ri: number) => {
-                      const ht = clComp.teams.find((t: any) => t.id === r.hId);
-                      const at = clComp.teams.find((t: any) => t.id === r.aId);
-                      const isMe = r.hId === careerClTeam?.id || r.aId === careerClTeam?.id;
+              clComp.history.map((h: any, i: number) => {
+                const isKnockoutDay = ['Octavos', 'Cuartos', 'Semis', 'Final'].some(k => (h.day || '').includes(k));
+                return (
+                  <div key={i} className='bg-slate-900/80 rounded-3xl p-4 border border-white/10 space-y-3 shadow-lg'>
+                    <div className='flex items-center justify-between pb-2 border-b border-white/5'>
+                      <div className='flex items-center gap-2'>
+                        <span className={`text-[9px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
+                          isKnockoutDay
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                            : 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                        }`}>
+                          {h.day}
+                        </span>
+                      </div>
+                      <span className='text-[8px] font-bold text-slate-400'>
+                        {h.results?.length || 0} {h.results?.length === 1 ? 'partido disputado' : 'partidos disputados'}
+                      </span>
+                    </div>
 
-                      return (
-                        <div
-                          key={ri}
-                          className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl text-[9px] ${
-                            isMe ? 'bg-blue-600/20 border border-blue-500/40 text-blue-200' : 'bg-black/30 text-slate-300'
-                          }`}
-                        >
-                          <span className='truncate font-bold max-w-[90px]'>{ht?.name || 'Local'}</span>
-                          <span className='font-black tabular-nums bg-black/40 px-2 py-0.5 rounded'>
-                            {r.sh} - {r.sa} {r.penH !== null && r.penH !== undefined && `(${r.penH}-${r.penA} pen)`}
-                          </span>
-                          <span className='truncate font-bold max-w-[90px] text-right'>{at?.name || 'Visitante'}</span>
-                        </div>
-                      );
-                    })}
+                    <div className='grid grid-cols-1 md:grid-cols-2 gap-2'>
+                      {h.results?.map((r: any, ri: number) => {
+                        const rawHome = clComp.teams.find((t: any) => t.id === r.hId);
+                        const rawAway = clComp.teams.find((t: any) => t.id === r.aId);
+                        const isHomeMe = r.hId === careerClTeam?.id;
+                        const isAwayMe = r.aId === careerClTeam?.id;
+                        const isMe = isHomeMe || isAwayMe;
+
+                        const home = isHomeMe ? { ...rawHome, ...team } : rawHome;
+                        const away = isAwayMe ? { ...rawAway, ...team } : rawAway;
+
+                        const homeWon = r.sh > r.sa || (r.penH !== null && r.penH !== undefined && r.penH > r.penA);
+                        const awayWon = r.sa > r.sh || (r.penA !== null && r.penA !== undefined && r.penA > r.penH);
+                        const isTie = r.sh === r.sa && (r.penH === null || r.penH === undefined);
+
+                        return (
+                          <div
+                            key={ri}
+                            className={`flex items-center justify-between p-3 rounded-2xl border transition-all ${
+                              isMe
+                                ? 'bg-gradient-to-r from-blue-950/60 to-indigo-950/60 border-blue-400/50 shadow-md ring-1 ring-blue-400/20'
+                                : 'bg-black/30 border-white/5 hover:border-white/10'
+                            }`}
+                          >
+                            {/* Equipo Local */}
+                            <div className='flex items-center gap-2 flex-1 min-w-0 pr-2'>
+                              <Shield color1={home?.color1} color2={home?.color2} initial={home?.name} size='xs' isFlag={home?.isFlag} />
+                              <span className={`text-[10px] font-black uppercase truncate ${
+                                isHomeMe ? 'text-blue-300' : homeWon ? 'text-white' : isTie ? 'text-slate-300' : 'text-slate-400'
+                              }`}>
+                                {home?.name || 'Local'}
+                              </span>
+                            </div>
+
+                            {/* Marcador */}
+                            <div className='shrink-0 text-center px-2.5 py-1 bg-black/60 rounded-xl border border-white/10'>
+                              <span className='text-[11px] font-black tracking-wider text-white tabular-nums'>
+                                {r.sh} - {r.sa}
+                              </span>
+                              {r.penH !== null && r.penH !== undefined && (
+                                <span className='block text-[7.5px] font-bold text-amber-300'>
+                                  ({r.penH}-{r.penA} pen)
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Equipo Visitante */}
+                            <div className='flex items-center justify-end gap-2 flex-1 min-w-0 pl-2 text-right'>
+                              <span className={`text-[10px] font-black uppercase truncate ${
+                                isAwayMe ? 'text-blue-300' : awayWon ? 'text-white' : isTie ? 'text-slate-300' : 'text-slate-400'
+                              }`}>
+                                {away?.name || 'Visitante'}
+                              </span>
+                              <Shield color1={away?.color1} color2={away?.color2} initial={away?.name} size='xs' isFlag={away?.isFlag} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             ) : (
-              <div className='bg-slate-900/60 rounded-3xl p-6 text-center text-slate-400 text-xs font-bold'>
-                Aún no hay jornadas disputadas en esta edición de la Champions League.
+              <div className='bg-slate-900/60 rounded-3xl p-8 text-center text-slate-400 text-xs font-bold border border-white/5 space-y-2'>
+                <p className='text-sm text-slate-300 font-black uppercase'>Sin partidos registrados</p>
+                <p className='text-[10px]'>Aún no se han disputado jornadas en la presente edición de la UEFA Champions League.</p>
               </div>
             )}
           </motion.div>
@@ -1344,16 +1478,24 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
               </div>
 
               {/* Recompensas */}
-              <div className='grid grid-cols-2 gap-2 pt-1'>
-                <div className='bg-black/30 rounded-xl p-2.5 text-center border border-white/5'>
-                  <p className='text-[8px] font-black uppercase text-amber-400'>Puntos de Entrenamiento</p>
-                  <p className='text-xs font-black text-white'>+{clObjective.target.pe} PE</p>
+              {isNotQualified ? (
+                <div className='bg-black/30 rounded-xl p-3 text-center border border-white/5'>
+                  <p className='text-[8px] font-black uppercase text-slate-400'>Beneficios Continental</p>
+                  <p className='text-xs font-black text-slate-300 mt-0.5'>Sin beneficios por objetivo</p>
+                  <p className='text-[9px] font-bold text-slate-500 mt-0.5'>Al no haber clasificado a Champions League, no se perciben PE ni Reputación por este concepto.</p>
                 </div>
-                <div className='bg-black/30 rounded-xl p-2.5 text-center border border-white/5'>
-                  <p className='text-[8px] font-black uppercase text-sky-400'>Reputación Continental</p>
-                  <p className='text-xs font-black text-white'>+{clObjective.target.rep} pts</p>
+              ) : (
+                <div className='grid grid-cols-2 gap-2 pt-1'>
+                  <div className='bg-black/30 rounded-xl p-2.5 text-center border border-white/5'>
+                    <p className='text-[8px] font-black uppercase text-amber-400'>Puntos de Entrenamiento</p>
+                    <p className='text-xs font-black text-white'>+{clObjective.target.pe} PE</p>
+                  </div>
+                  <div className='bg-black/30 rounded-xl p-2.5 text-center border border-white/5'>
+                    <p className='text-[8px] font-black uppercase text-sky-400'>Reputación Continental</p>
+                    <p className='text-xs font-black text-white'>+{clObjective.target.rep} pts</p>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </motion.div>
         )}

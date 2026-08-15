@@ -362,10 +362,15 @@ export const CareerView = ({
   onAdvanceOfficeWeek, onDecideLaterAppOffer, onRejectAppResolution, onDismissAppResolutionModal,
   onDismissSimulationFeedback, allComps, schedule, clComp, onPlayChampionsMatch,
   onSimulateChampionsMatch, onSimulateAllChampions, onDeleteCareer, onArchiveAndResetCareer,
-  pastCareers = [], onDeletePastCareer, ui
+  pastCareers = [], onDeletePastCareer, tab: externalTab, onTabChange: onExternalTabChange, ui
 }) => {
   const { Shield, FormBadges, DieIcon } = ui;
-  const [tab, setTab] = useState('main');
+  const [internalTab, setInternalTab] = useState('main');
+  const tab = externalTab !== undefined ? externalTab : internalTab;
+  const setTab = (newTab) => {
+    setInternalTab(newTab);
+    if (onExternalTabChange) onExternalTabChange(newTab);
+  };
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(career.manager || '');
   const [showTrainingModal, setShowTrainingModal] = useState(false);
@@ -1405,7 +1410,14 @@ export const CareerView = ({
                   </div>
                   <div className='flex items-center justify-between mt-4'>
                     <div className='flex-1 text-center'>
-                      <Shield color1={team?.color1} color2={team?.color2} initial={team?.name} size='md' isFlag={team?.isFlag} />
+                      <div className='relative inline-block'>
+                        <Shield color1={team?.color1} color2={team?.color2} initial={team?.name} size='md' isFlag={team?.isFlag} />
+                        {position > 0 && (
+                          <span className='absolute -bottom-1 -right-1 bg-slate-950/90 text-amber-400 border border-amber-400/40 text-[7.5px] font-black px-1.5 py-0.2 rounded-full shadow-md'>
+                            {position}º
+                          </span>
+                        )}
+                      </div>
                       <p className='text-[9px] font-black uppercase italic mt-2 text-white truncate'>{team?.name}</p>
                       <p className='text-[8px] font-black uppercase text-amber-400 mt-0.5'>{isHome ? 'Local' : 'Visitante'}</p>
                     </div>
@@ -1414,7 +1426,17 @@ export const CareerView = ({
                       <p className='text-2xl font-black italic text-white'>VS</p>
                     </div>
                     <div className='flex-1 text-center'>
-                      <Shield color1={rival?.color1} color2={rival?.color2} initial={rival?.name} size='md' isFlag={rival?.isFlag} />
+                      <div className='relative inline-block'>
+                        <Shield color1={rival?.color1} color2={rival?.color2} initial={rival?.name} size='md' isFlag={rival?.isFlag} />
+                        {(() => {
+                          const rivalPos = (standings || []).findIndex((t: any) => t.id === rival?.id) + 1;
+                          return rivalPos > 0 ? (
+                            <span className='absolute -bottom-1 -right-1 bg-slate-950/90 text-slate-300 border border-white/20 text-[7.5px] font-black px-1.5 py-0.2 rounded-full shadow-md'>
+                              {rivalPos}º
+                            </span>
+                          ) : null;
+                        })()}
+                      </div>
                       <p className='text-[9px] font-black uppercase italic mt-2 text-white truncate'>{rival?.name}</p>
                       <p className='text-[8px] font-black uppercase text-slate-400 mt-0.5'>{isHome ? 'Visitante' : 'Local'}</p>
                     </div>
