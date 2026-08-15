@@ -2774,7 +2774,8 @@ function DiceFootballApp() {
     setMatchState({
       home, away, scoreH: 0, scoreA: 0, oppH: home.opp, oppA: away.opp, turn: 'H', phase: 'att', isDiv2Context,
       logs: ['⚽ ¡Comienza el encuentro!', aggregate ? `📊 Global: ${aggregate.sh} - ${aggregate.sa}` : 'Al terreno de juego.'],
-      lastDie: 1, finished: false, isKnockout: activeComp.type === 'knockout' || (activeComp.type === 'cup' && activeComp.phase !== 'groups'), penalties: null, aggregate
+      lastDie: 1, finished: false, isKnockout: activeComp.type === 'knockout' || (activeComp.type === 'cup' && activeComp.phase !== 'groups'),
+      penalties: null, aggregate, isChampions: activeCompId === 'C1', isVuelta, championsPhase: activeComp.phase
     });
     setCompView('playing');
   };
@@ -2859,9 +2860,15 @@ function DiceFootballApp() {
     if (nextTurn === 'A' && nextOppA <= 0) nextTurn = 'H';
 
     if (nextOppH <= 0 && nextOppA <= 0) {
-      const isChampions = activeCompId === 'C1';
-      const isIda = isChampions && activeComp.matchday % 2 === 0 && activeComp.phase !== 'Final' && activeComp.phase !== 'groups';
-      const isVuelta = isChampions && activeComp.matchday % 2 !== 0 && activeComp.phase !== 'Final' && activeComp.phase !== 'groups';
+      // Preferimos el Ida/Vuelta y la fase ya fijados al arrancar ESTE partido (state.isVuelta/state.championsPhase).
+      // Recalcularlos desde activeComp aquí es incorrecto para partidos de Champions del modo carrera, donde
+      // activeComp puede reflejar otra competición o una fase distinta a la que realmente se está jugando.
+      const hasExplicitContext = typeof state.isVuelta === 'boolean';
+      const isChampions = hasExplicitContext ? !!state.isChampions : activeCompId === 'C1';
+      const currentPhase = hasExplicitContext ? state.championsPhase : activeComp.phase;
+      const isTwoLegged = isChampions && currentPhase !== 'Final' && currentPhase !== 'groups';
+      const isIda = isTwoLegged && (hasExplicitContext ? !state.isVuelta : activeComp.matchday % 2 === 0);
+      const isVuelta = isTwoLegged && (hasExplicitContext ? !!state.isVuelta : activeComp.matchday % 2 !== 0);
       let needsPenalties = state.isKnockout && state.scoreH === state.scoreA && !isIda && !isVuelta;
       if (isVuelta && state.aggregate) if (state.aggregate.sh + state.scoreH === state.aggregate.sa + state.scoreA) needsPenalties = true;
 
@@ -4306,7 +4313,7 @@ function DiceFootballApp() {
           peGained: totalPeGained,
           matchPeGained,
           trainingPeGained: extraTrainingPe,
-          trainingFeedback,
+          trainingResult: (trainingFeedback || (c.trainedMatchKey === currentMatchKey ? c.lastTrainingResult : null)) || undefined,
           repGained,
           headline: `⭐ UEFA Champions League · ${clPhaseLabel(currentPhase)}`,
           summary: isChampionsWinner
@@ -6743,12 +6750,7 @@ function DiceFootballApp() {
               {activeComp.bracket && (
                 <div className='space-y-6'>
                   <h2 className='text-xs font-black uppercase text-slate-200 border-b border-white/20 pb-2 drop-shadow-md'>Eliminatorias</h2>
-                  {(() => {
-                    const po = ['Octavos', 'Cuartos', 'Semis', 'Final'];
-                    const curIdx = po.indexOf(activeComp.phase);
-                    if (curIdx === -1) return po; 
-                    return [...po.slice(curIdx, curIdx + 1), ...po.slice(curIdx + 1), ...po.slice(0, curIdx).reverse()];
-                  })().map(phase => {
+                  {['Octavos', 'Cuartos', 'Semis', 'Final'].map(phase => {
                     const matches = activeComp.bracket[phase];
                     if (!matches || (Array.isArray(matches) && matches.length === 0)) return null;
                     const matchArray = Array.isArray(matches) ? matches : [matches];
