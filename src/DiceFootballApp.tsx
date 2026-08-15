@@ -23,7 +23,7 @@ import {
   peForResult, repForMatch, clampRep, objectiveFor, expectedPosition, readPerformance, buildOffers,
   CONTRACT_SEASONS, CL_SPOTS, isSquadMaxed, clPhaseLabel, clProgressRep, fireChance, seasonObjectives,
   remainingUpgradeCost, capPE, signingRepBonus, evaluateApplication, getMarketVacancies,
-  SPECIAL_OFFICE_WEEKS, calculateCurrentSeasonWeek
+  SPECIAL_OFFICE_WEEKS, calculateCurrentSeasonWeek, getChampionsMatchKey
 } from '@/lib/career';
 import { sanitizeChampionsBracket } from '@/lib/championsSanitizer';
 
@@ -2444,6 +2444,7 @@ function DiceFootballApp() {
   const [championModalTab, setChampionModalTab] = useState<'stats' | 'results' | 'promotions' | 'bracket'>('stats');
   const [championModalDiv, setChampionModalDiv] = useState(1);
   const [standingsView, setStandingsView] = useState<'current' | 'previous'>('current');
+  const [careerTab, setCareerTab] = useState('main');
 
   const [eliminatedModal, setEliminatedModal] = useState<{ compId: string; phase: string } | null>(null);
   const [resetConfirmModal, setResetConfirmModal] = useState(false);
@@ -2719,11 +2720,22 @@ function DiceFootballApp() {
 
   const [matchState, setMatchState] = useState(null);
   const [rolling, setRolling] = useState(false);
+  const rollingRef = useRef(false);
   const rollIntervalRef = useRef(null);
+  const rollTimeoutRef = useRef(null);
 
-  useEffect(() => () => rollIntervalRef.current && clearInterval(rollIntervalRef.current), []);
+  useEffect(() => {
+    return () => {
+      if (rollIntervalRef.current) clearInterval(rollIntervalRef.current);
+      if (rollTimeoutRef.current) clearTimeout(rollTimeoutRef.current);
+    };
+  }, []);
 
   const startMatch = (homeId, awayId, isDiv2Context) => {
+    if (rollIntervalRef.current) { clearInterval(rollIntervalRef.current); rollIntervalRef.current = null; }
+    if (rollTimeoutRef.current) { clearTimeout(rollTimeoutRef.current); rollTimeoutRef.current = null; }
+    rollingRef.current = false;
+    setRolling(false);
     const sourceTeams = isDiv2Context ? activeComp.teams2 : activeComp.teams;
     let home = sourceTeams.find(t => t.id === homeId);
     let away = sourceTeams.find(t => t.id === awayId);
@@ -2768,13 +2780,16 @@ function DiceFootballApp() {
   };
 
   const handleRoll = () => {
-    if (rolling || matchState.finished) return;
+    if (rollingRef.current || rolling || !matchState || matchState.finished) return;
+    rollingRef.current = true;
     setRolling(true);
-    if (rollIntervalRef.current) clearInterval(rollIntervalRef.current);
+    if (rollIntervalRef.current) { clearInterval(rollIntervalRef.current); rollIntervalRef.current = null; }
+    if (rollTimeoutRef.current) { clearTimeout(rollTimeoutRef.current); rollTimeoutRef.current = null; }
     rollIntervalRef.current = setInterval(() => setMatchState(prev => prev ? { ...prev, lastDie: Math.floor(Math.random() * 6) + 1 } : prev), 100);
 
-    setTimeout(() => {
+    rollTimeoutRef.current = setTimeout(() => {
       if (rollIntervalRef.current) { clearInterval(rollIntervalRef.current); rollIntervalRef.current = null; }
+      rollTimeoutRef.current = null;
       const die = Math.floor(Math.random() * 6) + 1;
       setMatchState(prev => {
         if (!prev) return prev;
@@ -2831,6 +2846,7 @@ function DiceFootballApp() {
         }
         return { ...prev, lastDie: die, logs: newLogs, phase: newPhase };
       });
+      rollingRef.current = false;
       setRolling(false);
     }, 800);
   };
@@ -3114,11 +3130,19 @@ function DiceFootballApp() {
     ? careerTeams.find(t => t.id === (careerIsHome ? careerFixture.awayId : careerFixture.homeId))
     : null;
   const careerWorldPending = pendingLeagueIds.filter(id => id !== career.compId).length;
-  // Candidatos para (re)empezar: los 5 clubes más humildes y, si te despidieron
-  // del club de tu primera temporada y era de los más bajos, ese club también.
+  // Candidatos para (re)empezar: si la temporada de Segunda ya está en marcha,
+  // los 5 últimos de la tabla real de Miscelánea; si no, los 5 más humildes.
   const careerCandidates = useMemo(() => {
-    const pool = comps[CAREER_LEAGUE_ID]?.teams2 || [];
-    const list = worstTeams(pool, 5);
+    const miscelanea = comps[CAREER_LEAGUE_ID];
+    const pool = miscelanea?.teams2 || [];
+    const playedAny = (miscelanea?.matchday2 || 0) > 0 || pool.some(t => (t.p || 0) > 0);
+    let list;
+    if (playedAny) {
+      const standings = [...pool].sort((a, b) => (b.pts || 0) - (a.pts || 0) || ((b.gf || 0) - (b.ga || 0)) - ((a.gf || 0) - (a.ga || 0)) || (b.gf || 0) - (a.gf || 0));
+      list = standings.slice(Math.max(0, standings.length - 5));
+    } else {
+      list = worstTeams(pool, 5);
+    }
     const firstId = career.firstTeamId;
     if (firstId && career.firstTeamCompId === CAREER_LEAGUE_ID && !list.some(t => t.id === firstId)) {
       const first = pool.find(t => t.id === firstId);
@@ -3126,7 +3150,7 @@ function DiceFootballApp() {
     }
     return list;
   }, [comps, career.firstTeamId, career.firstTeamCompId]);
-  const careerUi = { Shield, DieIcon, FormBadges };
+  const careerUi = { Shield, DieIcon, FormBadges, PenaltyDots };
 
   // RESTAURACIÓN Y PROTECCIÓN DE ESTADÍSTICAS DEL EQUIPO (Estadísticas originales + mejoras de P/E)
   useEffect(() => {
@@ -3293,11 +3317,12 @@ function DiceFootballApp() {
 
   const currentMatchKey = useMemo(() => {
     const cl = comps['C1'];
+    const currentSeason = seasonState.season || career.clSeason || 1;
     if (seasonState.phase === 'champions' || (cl?.teams?.length && cl.phase && cl.phase !== 'Terminado')) {
-      return `cl-${seasonState.season || 1}-${cl.phase || 'groups'}-${cl.matchday || 0}`;
+      return getChampionsMatchKey(currentSeason, cl.phase || 'groups', cl.matchday || 0);
     }
-    return `league-${seasonState.season || 1}-${career.div || 1}-${careerMd}`;
-  }, [seasonState.phase, seasonState.season, comps, career.div, careerMd]);
+    return `league-${currentSeason}-${career.div || 1}-${careerMd}`;
+  }, [seasonState.phase, seasonState.season, comps, career.div, career.clSeason, careerMd]);
 
   const applyDrillResult = (result) => {
     if (!careerTeam) return;
@@ -3323,6 +3348,7 @@ function DiceFootballApp() {
           pe: Math.max(0, (c.pe || 0) - (result.peCost || 0)),
           trainedMatchday: careerMd,
           trainedMatchKey: currentMatchKey,
+          trainedClMatchKey: currentMatchKey,
           activeInjury: null,
           medicalImmunityWeeks: 3,
           immunityActivatedMatchday: careerMd,
@@ -3345,6 +3371,7 @@ function DiceFootballApp() {
           ...c,
           trainedMatchday: careerMd,
           trainedMatchKey: currentMatchKey,
+          trainedClMatchKey: currentMatchKey,
           activeInjury: {
             attr,
             label: attrLabel,
@@ -3369,6 +3396,7 @@ function DiceFootballApp() {
         pe: (c.pe || 0) + result.peGained,
         trainedMatchday: careerMd,
         trainedMatchKey: currentMatchKey,
+        trainedClMatchKey: currentMatchKey,
         lastTrainingResult: drillFeedback
       }));
       return;
@@ -3379,6 +3407,7 @@ function DiceFootballApp() {
       ...c,
       trainedMatchday: careerMd,
       trainedMatchKey: currentMatchKey,
+      trainedClMatchKey: currentMatchKey,
       lastTrainingResult: drillFeedback
     }));
   };
@@ -5251,7 +5280,8 @@ function DiceFootballApp() {
                    if(spH > spA + (5-shA) || spA > spH + (5-shH)) break;
                 }
                 while(spH===spA){ if(sim(h.att, a.def)) spH++; if(sim(a.att, h.def)) spA++; }
-                penH = spH; penA = spA;
+                penH = isVuelta ? spA : spH;
+                penA = isVuelta ? spH : spA;
              }
           }
           if (isVuelta) { m.sh2 = sh; m.sa2 = sa; } else { m.sh = sh; m.sa = sa; }
@@ -5989,34 +6019,100 @@ function DiceFootballApp() {
 
                 {/* TAB: RESULTS */}
                 {championModalTab === 'results' && (
-                  <div>
-                    <h3 className='text-xs font-black uppercase text-slate-200 mb-3 text-center'>Resultados</h3>
+                  <div className='space-y-3'>
+                    <div className='flex items-center justify-between'>
+                      <h3 className='text-xs font-black uppercase text-slate-200'>Historial Completo de Resultados</h3>
+                      <span className='text-[8px] font-bold text-slate-400'>
+                        {displayHistory.reduce((acc: number, h: any) => acc + (h.results?.length || 0), 0)} partidos disputados
+                      </span>
+                    </div>
+
                     <div className='space-y-3 max-h-[60vh] overflow-y-auto custom-scrollbar pr-1'>
-                      {displayHistory.length === 0 && <p className='text-center text-[10px] text-slate-400 italic py-8'>No hay resultados.</p>}
-                      {displayHistory.map((h, i) => (
-                        <div key={i} className='bg-black/20 rounded-xl p-2.5 border border-white/5'>
-                          <h4 className='text-[8px] font-black uppercase text-blue-300 mb-1.5'>Jornada {h.day}</h4>
-                          <div className='space-y-1'>
-                            {Array.isArray(h.results) && h.results.map((r, ri) => {
-                              const home = displayAllTeams.find(t => t.id === r.hId);
-                              const away = displayAllTeams.find(t => t.id === r.aId);
-                              return (
-                                <div key={ri} className='flex items-center justify-between text-[8px] py-0.5'>
-                                  <div className='flex items-center gap-1 w-20 truncate'>
-                                    <Shield color1={home?.color1} color2={home?.color2} initial={home?.name} size='xs' isFlag={home?.isFlag}/>
-                                    <span className='font-bold uppercase truncate'>{home?.name}</span>
-                                  </div>
-                                  <span className='font-black bg-slate-800/60 px-1.5 rounded tabular-nums'>{r.sh}-{r.sa}</span>
-                                  <div className='flex items-center gap-1 w-20 justify-end truncate'>
-                                    <span className='font-bold uppercase truncate'>{away?.name}</span>
-                                    <Shield color1={away?.color1} color2={away?.color2} initial={away?.name} size='xs' isFlag={away?.isFlag}/>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
+                      {displayHistory.length === 0 && (
+                        <div className='bg-slate-900/40 rounded-2xl p-8 text-center text-slate-400 text-xs font-bold border border-white/5'>
+                          No hay resultados registrados en esta competición.
                         </div>
-                      ))}
+                      )}
+                      {displayHistory.map((h: any, i: number) => {
+                        const isKnockoutDay = ['Octavos', 'Cuartos', 'Semis', 'Final'].some(k => (h.day || '').includes(k));
+                        const rawDay = (h.day || '').replace(/^Jornada\s+/i, '');
+                        const dayTitle = isKnockoutDay
+                          ? (h.day.includes('·') ? h.day : `Fase Eliminatoria · ${h.day}`)
+                          : `Jornada ${rawDay}`;
+
+                        return (
+                          <div key={i} className='bg-slate-900/80 rounded-2xl p-3.5 border border-white/10 space-y-2.5 shadow-md'>
+                            <div className='flex items-center justify-between pb-1.5 border-b border-white/5'>
+                              <div className='flex items-center gap-2'>
+                                <span className={`text-[9px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
+                                  isKnockoutDay
+                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                                    : 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                                }`}>
+                                  {dayTitle}
+                                </span>
+                              </div>
+                              <span className='text-[8px] font-bold text-slate-400'>
+                                {h.results?.length || 0} {h.results?.length === 1 ? 'partido' : 'partidos'}
+                              </span>
+                            </div>
+
+                            <div className='grid grid-cols-1 md:grid-cols-2 gap-2'>
+                              {Array.isArray(h.results) && h.results.map((r: any, ri: number) => {
+                                const home = displayAllTeams.find(t => t.id === r.hId);
+                                const away = displayAllTeams.find(t => t.id === r.aId);
+                                const homeWon = r.sh > r.sa || (r.penH !== null && r.penH !== undefined && r.penH > r.penA);
+                                const awayWon = r.sa > r.sh || (r.penA !== null && r.penA !== undefined && r.penA > r.penH);
+                                const isTie = r.sh === r.sa && (r.penH === null || r.penH === undefined);
+                                const isUserMatch = r.hId === careerTeam?.id || r.aId === careerTeam?.id || r.hId === activeComp?.careerTeamId || r.aId === activeComp?.careerTeamId || r.hId === activeComp?.userTeamId || r.aId === activeComp?.userTeamId;
+
+                                return (
+                                  <div
+                                    key={ri}
+                                    className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
+                                      isUserMatch
+                                        ? 'bg-gradient-to-r from-blue-950/70 to-indigo-950/70 border-blue-400/50 shadow-inner ring-1 ring-blue-400/20'
+                                        : 'bg-black/40 border-white/5 hover:border-white/10'
+                                    }`}
+                                  >
+                                    {/* Equipo Local */}
+                                    <div className='flex items-center gap-2 flex-1 min-w-0 pr-2'>
+                                      <Shield color1={home?.color1} color2={home?.color2} initial={home?.name} size='xs' isFlag={home?.isFlag} />
+                                      <span className={`text-[9.5px] font-black uppercase truncate ${
+                                        homeWon ? 'text-white' : isTie ? 'text-slate-300' : 'text-slate-400'
+                                      }`}>
+                                        {home?.name || 'Local'}
+                                      </span>
+                                    </div>
+
+                                    {/* Marcador Central */}
+                                    <div className='shrink-0 text-center px-2.5 py-1 bg-black/70 rounded-lg border border-white/10 shadow-sm'>
+                                      <span className='text-[11px] font-black tracking-widest text-white tabular-nums'>
+                                        {r.sh} - {r.sa}
+                                      </span>
+                                      {r.penH !== null && r.penH !== undefined && (
+                                        <span className='block text-[7.5px] font-black text-amber-400'>
+                                          ({r.penH}-{r.penA} pen)
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Equipo Visitante */}
+                                    <div className='flex items-center justify-end gap-2 flex-1 min-w-0 pl-2 text-right'>
+                                      <span className={`text-[9.5px] font-black uppercase truncate ${
+                                        awayWon ? 'text-white' : isTie ? 'text-slate-300' : 'text-slate-400'
+                                      }`}>
+                                        {away?.name || 'Visitante'}
+                                      </span>
+                                      <Shield color1={away?.color1} color2={away?.color2} initial={away?.name} size='xs' isFlag={away?.isFlag} />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
