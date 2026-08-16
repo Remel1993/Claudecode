@@ -29,6 +29,7 @@ import {
   roll1D6, simOpportunity, simPenalty, simMatchGoals, simPenaltyShootout
 } from '@/lib/career';
 import { sanitizeChampionsBracket } from '@/lib/championsSanitizer';
+import championsStadiumBg from './assets/images/champions_stadium_night_1786919054202.jpg';
 
 // ==========================================
 // 1. CONSTANTES DEL SISTEMA Y PRESETS
@@ -751,15 +752,22 @@ const getShuffleData = (compId, compsState) => {
 };
 
 
-const generateKnockoutBrackets = (comp) => {
+const generateKnockoutBrackets = (comp: any) => {
   if (!comp || !Array.isArray(comp.groups) || !Array.isArray(comp.teams)) return null;
-  const groupResults = comp.groups.map(g => {
-    const teams = comp.teams.filter(t => g.teamIds && g.teamIds.includes(t.id)).sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf);
+  const groupResults = comp.groups.map((g: any) => {
+    const teams = comp.teams.filter((t: any) => g.teamIds && g.teamIds.includes(t.id)).sort((a: any, b: any) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf);
     return { first: teams[0], second: teams[1] };
   });
 
   const numGroups = groupResults.length;
-  const bracket = { Octavos: [], Cuartos: [], Semis: [], Final: [{ id: 'F1', hId: null, aId: null, sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null }] };
+  const isWC = comp.id === 'C2' || numGroups === 8 || (comp.name || '').includes('Mundial') || (comp.name || '').includes('World');
+  const bracket: any = {
+    Octavos: [],
+    Cuartos: [],
+    Semis: [],
+    TercerPuesto: isWC ? [{ id: 'TP1', hId: null, aId: null, sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null }] : null,
+    Final: [{ id: 'F1', hId: null, aId: null, sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null }]
+  };
 
   if (numGroups === 8) {
     for (let i = 0; i < 8; i += 2) {
@@ -908,6 +916,8 @@ export interface ChampionRecord {
     color1?: string; color2?: string; isFlag?: boolean;
   };
   runnerUp: { id: any; name: string; pts: number } | null;
+  thirdPlace?: { id: any; name: string } | null;
+  fourthPlace?: { id: any; name: string } | null;
   records: {
     topScoring: { name: string; value: number };
     bestDefense: { name: string; value: number };
@@ -952,10 +962,11 @@ const buildSeasonRecord = (teams: any[], currentSeason: number): ChampionRecord 
   };
 };
 
-// Construye el resumen de torneo para copas/mundiales (campeón + subcampeón de la final)
+// Construye el resumen de torneo para copas/mundiales (campeón + subcampeón + 3er puesto)
 const buildCupSeasonRecord = (comp: any, currentSeason: number): ChampionRecord | null => {
   if (!comp) return null;
   const final = comp.bracket?.Final?.[0] || comp.bracket?.Final;
+  const tp = comp.bracket?.TercerPuesto?.[0] || comp.bracket?.TercerPuesto;
   const t = comp.teams || [];
   let champ = null;
   let second = null;
@@ -967,6 +978,15 @@ const buildCupSeasonRecord = (comp: any, currentSeason: number): ChampionRecord 
   }
   if (!champ) return null;
 
+  let third = null;
+  let fourth = null;
+  if (tp && tp.sh !== null && tp.sh !== undefined) {
+    const tpWinId = (tp.sh > tp.sa) ? tp.hId : (tp.sa > tp.sh) ? tp.aId : (((tp.penH || 0) > (tp.penA || 0)) ? tp.hId : tp.aId);
+    const tpLoseId = tpWinId === tp.hId ? tp.aId : tp.hId;
+    third = t.find((x: any) => x.id === tpWinId);
+    fourth = t.find((x: any) => x.id === tpLoseId);
+  }
+
   return {
     season: currentSeason,
     champion: {
@@ -975,6 +995,8 @@ const buildCupSeasonRecord = (comp: any, currentSeason: number): ChampionRecord 
       color1: champ.color1, color2: champ.color2, isFlag: champ.isFlag
     },
     runnerUp: second ? { id: second.id, name: second.name, pts: second.pts || 0 } : null,
+    thirdPlace: third ? { id: third.id, name: third.name } : null,
+    fourthPlace: fourth ? { id: fourth.id, name: fourth.name } : null,
     records: {
       topScoring: leaderBy(t, (x: any) => x.gf || 0, 'max'),
       bestDefense: leaderBy(t, (x: any) => x.ga || 0, 'min'),
@@ -1005,7 +1027,7 @@ const ChampionsHistoryModal = ({ championsHistory = [], onClose, title = 'Palmar
   const canShowWinners = (showTopWinners || !!compId) && !!compId;
 
   return (
-  <div className='fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-3' onClick={onClose}>
+  <div className='fixed inset-0 z-[120] bg-black/85 backdrop-blur-md flex items-end sm:items-center justify-center p-3' onClick={onClose}>
     <div onClick={e => e.stopPropagation()} className='w-full max-w-md bg-slate-900 border border-amber-400/30 rounded-[1.75rem] shadow-2xl overflow-hidden'>
       <div className='flex items-center justify-between gap-3 px-4 py-3 border-b border-white/10 bg-gradient-to-r from-amber-500/20 to-transparent'>
         <div className='flex min-w-0 items-center gap-2'>
@@ -1045,9 +1067,14 @@ const ChampionsHistoryModal = ({ championsHistory = [], onClose, title = 'Palmar
               <div className='min-w-0'>
                 <p className='text-[8px] font-black uppercase tracking-widest text-amber-400'>Temporada {r.season}</p>
                 <p className='truncate text-[13px] font-black uppercase italic text-white'>{r.champion.name}</p>
-                {r.runnerUp && (
-                  <p className='truncate text-[9px] font-bold text-slate-400'>2º {r.runnerUp.name} · {r.runnerUp.pts} pts</p>
-                )}
+                <div className='flex flex-wrap gap-x-2 gap-y-0.5 mt-0.5'>
+                  {r.runnerUp && (
+                    <span className='text-[9px] font-bold text-slate-400'>🥈 2º {r.runnerUp.name}</span>
+                  )}
+                  {r.thirdPlace && (
+                    <span className='text-[9px] font-bold text-amber-400'>🥉 3º {r.thirdPlace.name}</span>
+                  )}
+                </div>
               </div>
               <span className='shrink-0 rounded-lg border border-amber-400/30 bg-amber-500/15 px-2 py-1 text-[10px] font-black text-amber-300'>{r.champion.pts} PTS</span>
             </div>
@@ -2097,160 +2124,359 @@ const HubView = ({ setView, setActiveCompId, setCompView, comps, seasonState, pe
   const globalMatchday = seasonState?.globalMatchday || 1;
   const pending = pendingLeagueIds || [];
   const leagues = [
-    { id: 'L1', color: 'blue' }, { id: 'L2', color: 'emerald' }, { id: 'L3', color: 'orange' }, 
-    { id: 'L4', color: 'purple' }, { id: 'L5', color: 'red' }, { id: 'L6', color: 'indigo' }, { id: 'L7', color: 'pink' }
+    { id: 'L1', name: 'LaLiga', flag: '🇪🇸', country: 'España' },
+    { id: 'L2', name: 'Serie A', flag: '🇮🇹', country: 'Italia' },
+    { id: 'L3', name: 'Premier League', flag: '🇬🇧', country: 'Inglaterra' },
+    { id: 'L4', name: 'Bundesliga', flag: '🇩🇪', country: 'Alemania' },
+    { id: 'L5', name: 'Eredivisie', flag: '🇳🇱', country: 'Países Bajos' },
+    { id: 'L6', name: 'Ligue 1', flag: '🇫🇷', country: 'Francia' },
+    { id: 'L7', name: 'Miscelánea', flag: '🇵🇹', country: 'Portugal / Otros' }
   ];
 
   return (
-  <div className='flex-grow flex flex-col px-4 pb-8'>
-    <header className='py-10 text-center'>
-      <h1 className='text-5xl font-black uppercase italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-emerald-400 to-green-400 drop-shadow-[0_0_20px_rgba(52,211,153,0.3)]'>Football Hub</h1>
-      <p className='text-[11px] text-slate-200 font-bold uppercase tracking-widest mt-3 drop-shadow-md'>Elite Dice Engine v6</p>
-    </header>
-
-    <section className='mb-8 bg-slate-900/40 backdrop-blur-md rounded-[2rem] p-5 border border-emerald-500/20 shadow-[0_0_30px_rgba(52,211,153,0.12)]'>
-      <div className='flex items-center justify-between gap-3'>
-        <div>
-          <p className='text-[9px] font-black uppercase tracking-widest text-emerald-400'>🌎 Temporada {seasonState?.season || 1}</p>
-          <h2 className='text-2xl font-black uppercase italic text-white tracking-tight drop-shadow-md'>Jornada Global {globalMatchday}</h2>
-          <p className='text-[9px] font-bold uppercase tracking-wider text-slate-300 mt-1'>
-            {allLeaguesFinished
-              ? (championsFinished ? '🏆 Champions resuelta — lista para nueva temporada' : '🏆 Ligas finalizadas — juega la Champions League')
-              : pending.length === 0
-                ? '✔️ Jornada resuelta en todas las ligas'
-                : `⏳ ${pending.length} liga${pending.length > 1 ? 's' : ''} con partidos pendientes`}
-          </p>
+    <div className='flex-grow flex flex-col px-3.5 sm:px-4 pb-12 space-y-4'>
+      {/* HEADER DE BIENVENIDA */}
+      <header className='pt-7 pb-2 text-center flex flex-col items-center'>
+        <div className='inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/15 border border-blue-400/30 text-blue-300 text-[9px] font-black uppercase tracking-widest backdrop-blur-md mb-2 shadow-[0_0_15px_rgba(59,130,246,0.2)]'>
+          <Sparkles size={11} className='text-blue-300' />
+          <span>UEFA Champions & World Leagues</span>
         </div>
-        <div className='w-14 h-14 rounded-2xl bg-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0 shadow-[inset_0_0_15px_rgba(52,211,153,0.2)]'><Calendar size={26}/></div>
-      </div>
-      {pending.length > 0 && (
-        <button onClick={onSimulateAll} className='mt-4 w-full bg-amber-500/90 text-slate-950 py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2'>
-          <Dices size={15}/> ▶ Simular jornada global {globalMatchday}
-        </button>
-      )}
-      {allLeaguesFinished && !championsFinished && (
-        <button onClick={() => { setActiveCompId('C1'); setCompView('main'); setView('competition'); }} className='mt-4 w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:to-indigo-500 text-white py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 border border-blue-400/40'>
-          <Trophy size={16} className='text-yellow-300 animate-pulse' /> Jugar Champions League
-        </button>
-      )}
-      {allLeaguesFinished && championsFinished && (
-        <button onClick={onNewSeason} className='mt-4 w-full bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2'>
-          <RotateCcw size={15}/> Iniciar nueva temporada global
-        </button>
-      )}
-    </section>
+        <h1 className='text-4xl sm:text-5xl font-black uppercase italic tracking-tighter text-white drop-shadow-[0_2px_15px_rgba(0,0,0,0.8)]'>
+          DICE FOOTBALL
+        </h1>
+        <p className='text-[10px] text-slate-300 font-bold uppercase tracking-widest mt-0.5 drop-shadow'>
+          Simulador Oficial · Temporada {seasonState?.season || 1}
+        </p>
+      </header>
 
-    <div className='space-y-8 flex-grow'>
-      <button onClick={onOpenCareer} className='w-full p-5 bg-slate-900/30 backdrop-blur-md rounded-[2rem] border border-amber-500/30 flex items-center justify-between hover:bg-amber-900/20 hover:border-amber-400/50 hover:shadow-[0_0_30px_rgba(245,158,11,0.2)] active:scale-[0.98] transition-all duration-300 group'>
-        <div className='flex items-center gap-4'>
-          <div className='w-14 h-14 rounded-2xl bg-amber-500/20 flex items-center justify-center text-amber-400 shadow-[inset_0_0_15px_rgba(245,158,11,0.25)] group-hover:scale-110 transition-transform duration-300'>
-            <Briefcase size={28} />
+      {/* PANEL DE CONTROL DE TEMPORADA / MATCHDAY */}
+      <section className='bg-slate-900/60 backdrop-blur-xl rounded-3xl p-4 sm:p-5 border border-white/10 shadow-2xl space-y-3.5'>
+        <div className='flex items-center justify-between gap-3'>
+          <div className='min-w-0'>
+            <div className='flex items-center gap-2'>
+              <span className='px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-[8.5px] font-black uppercase tracking-wider'>
+                Temporada {seasonState?.season || 1}
+              </span>
+              <span className='text-[8.5px] font-bold text-slate-400 uppercase tracking-wider'>
+                Jornada {globalMatchday}
+              </span>
+            </div>
+            <h2 className='text-lg font-black uppercase italic text-white tracking-tight mt-1 truncate'>
+              {allLeaguesFinished
+                ? (championsFinished ? 'Temporada Completada' : 'Fase Champions League')
+                : pending.length === 0
+                  ? 'Jornada al día en todas las ligas'
+                  : `${pending.length} liga${pending.length > 1 ? 's' : ''} pendiente${pending.length > 1 ? 's' : ''}`}
+            </h2>
           </div>
-          <div className='text-left'>
-            <h3 className='text-sm font-black uppercase italic text-white tracking-wide'>Modo Carrera</h3>
-            <p className='text-[10px] text-slate-300 font-bold uppercase tracking-widest mt-1'>
-              {career?.active ? `${career.manager} · Rep ${career.reputation}` : 'Empieza en la Miscelánea 2ª'}
+
+          <div className='w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-emerald-400 shrink-0 shadow-inner'>
+            <Calendar size={20} />
+          </div>
+        </div>
+
+        {/* Indicadores rápidos de progreso por liga */}
+        <div className='flex items-center gap-1.5 pt-0.5'>
+          {leagues.map(({ id, name }) => {
+            const isPending = pending.includes(id);
+            const comp = comps[id];
+            const finished = comp ? leagueSeasonOver(comp) : false;
+            return (
+              <div
+                key={id}
+                title={`${name}: ${finished ? 'Finalizada' : isPending ? 'Pendiente' : 'Al día'}`}
+                className={`flex-1 h-1.5 rounded-full transition-all ${
+                  finished
+                    ? 'bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.5)]'
+                    : isPending
+                    ? 'bg-amber-500/80 shadow-[0_0_8px_rgba(245,158,11,0.4)]'
+                    : 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.4)]'
+                }`}
+              />
+            );
+          })}
+        </div>
+
+        {/* BOTÓN PRINCIPAL DE ACCIÓN */}
+        {pending.length > 0 && (
+          <button
+            onClick={onSimulateAll}
+            className='w-full py-3.5 px-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 rounded-2xl text-[11px] font-black uppercase italic tracking-wider shadow-xl shadow-amber-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 border border-amber-300/40'
+          >
+            <Dices size={17} />
+            <span>Simular Jornada {globalMatchday} ({pending.length} ligas)</span>
+          </button>
+        )}
+
+        {allLeaguesFinished && !championsFinished && (
+          <button
+            onClick={() => { setActiveCompId('C1'); setCompView('main'); setView('competition'); }}
+            className='w-full py-3.5 px-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-2xl text-[11px] font-black uppercase italic tracking-wider shadow-xl shadow-blue-500/25 active:scale-[0.98] transition-all flex items-center justify-center gap-2 border border-blue-400/50'
+          >
+            <Trophy size={17} className='text-amber-300 animate-pulse' />
+            <span>Disputar Champions League</span>
+          </button>
+        )}
+
+        {allLeaguesFinished && championsFinished && (
+          <button
+            onClick={onNewSeason}
+            className='w-full py-3.5 px-4 bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 rounded-2xl text-[11px] font-black uppercase italic tracking-wider shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 border border-amber-300'
+          >
+            <RotateCcw size={16} />
+            <span>Iniciar Temporada {seasonState?.season ? seasonState.season + 1 : 2}</span>
+          </button>
+        )}
+      </section>
+
+      {/* MODO CARRERA DT */}
+      <button
+        onClick={onOpenCareer}
+        className='w-full p-4 bg-gradient-to-r from-slate-900/70 via-slate-900/60 to-amber-950/30 backdrop-blur-xl rounded-3xl border border-amber-400/30 flex items-center justify-between hover:border-amber-400/60 hover:shadow-[0_0_25px_rgba(245,158,11,0.2)] active:scale-[0.98] transition-all group text-left'
+      >
+        <div className='flex items-center gap-3.5 min-w-0'>
+          <div className='w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0 shadow-inner group-hover:scale-105 transition-transform'>
+            <Briefcase size={22} />
+          </div>
+          <div className='min-w-0'>
+            <div className='flex items-center gap-1.5'>
+              <h3 className='text-sm font-black uppercase italic text-white tracking-wide truncate'>Modo Carrera DT</h3>
+              <span className='text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30'>Oficial</span>
+            </div>
+            <p className='text-[10px] text-slate-300 font-bold uppercase tracking-wider mt-0.5 truncate'>
+              {career?.active
+                ? `${career.manager} · Rep. ${career.reputation} pts`
+                : 'Crea tu DT y asciende desde 2ª División'}
             </p>
           </div>
         </div>
-        <div className='w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-amber-300 group-hover:bg-amber-500/20 transition-colors'><ArrowRight size={20} /></div>
+        <div className='w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-amber-300 group-hover:bg-amber-500 group-hover:text-slate-950 transition-all shrink-0 ml-2'>
+          <ArrowRight size={15} />
+        </div>
       </button>
 
-      <div className='grid grid-cols-2 gap-4'>
-        <button onClick={() => setView('archive')} className='p-5 bg-slate-900/30 backdrop-blur-md rounded-[2rem] border border-white/10 flex flex-col items-center gap-3 hover:bg-slate-800/40 hover:border-yellow-500/30 hover:shadow-[0_0_25px_rgba(234,179,8,0.25)] active:scale-[0.98] transition-all duration-300 group'>
-          <div className='w-14 h-14 rounded-2xl bg-yellow-500/20 flex items-center justify-center text-yellow-400 shadow-[inset_0_0_15px_rgba(234,179,8,0.2)] group-hover:scale-110 transition-transform duration-300'><History size={28} /></div>
-          <div className='text-center'>
-            <h3 className='text-[13px] font-black uppercase italic text-white group-hover:text-yellow-400 transition-colors'>Historial</h3>
-            <p className='text-[9px] text-slate-300 font-bold mt-1 tracking-widest uppercase'>Salón de Fama</p>
+      {/* TORNEOS ESTRELLA (CHAMPIONS LEAGUE & COPA DEL MUNDO) */}
+      <div className='grid grid-cols-2 gap-3'>
+        {/* Champions League */}
+        <button
+          onClick={() => { setActiveCompId('C1'); setCompView('main'); setView('competition'); }}
+          className='p-4 bg-gradient-to-b from-blue-950/60 to-slate-900/60 backdrop-blur-xl rounded-3xl border border-blue-500/30 flex flex-col items-center text-center gap-2.5 hover:border-blue-400/60 hover:shadow-[0_0_25px_rgba(59,130,246,0.25)] active:scale-[0.98] transition-all group'
+        >
+          <div className='w-12 h-12 rounded-2xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-300 shadow-inner group-hover:scale-110 transition-transform'>
+            <Trophy size={24} className='text-blue-300 drop-shadow-[0_0_8px_rgba(96,165,250,0.8)]' />
+          </div>
+          <div className='min-w-0 w-full'>
+            <h4 className='text-xs font-black uppercase italic text-white tracking-wide truncate'>
+              {comps['C1']?.name || 'Champions League'}
+            </h4>
+            <div className='mt-1'>
+              <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30 inline-block'>
+                {comps['C1']?.phase === 'groups' ? 'Fase Grupos' : comps['C1']?.phase || 'Grupos'}
+              </span>
+            </div>
           </div>
         </button>
 
-        <button onClick={() => setView('rules')} className='p-5 bg-slate-900/30 backdrop-blur-md rounded-[2rem] border border-white/10 flex flex-col items-center gap-3 hover:bg-slate-800/40 hover:border-blue-500/30 hover:shadow-[0_0_25px_rgba(59,130,246,0.25)] active:scale-[0.98] transition-all duration-300 group'>
-          <div className='w-14 h-14 rounded-2xl bg-blue-500/20 flex items-center justify-center text-blue-400 shadow-[inset_0_0_15px_rgba(59,130,246,0.2)] group-hover:scale-110 transition-transform duration-300'><Info size={28} /></div>
-          <div className='text-center'>
-            <h3 className='text-[13px] font-black uppercase italic text-white group-hover:text-blue-400 transition-colors'>Reglas</h3>
-            <p className='text-[9px] text-slate-300 font-bold mt-1 tracking-widest uppercase'>Cómo jugar</p>
+        {/* Copa del Mundo */}
+        <button
+          onClick={() => { setActiveCompId('C2'); setCompView('main'); setView('competition'); }}
+          className='p-4 bg-gradient-to-b from-emerald-950/60 to-slate-900/60 backdrop-blur-xl rounded-3xl border border-emerald-500/30 flex flex-col items-center text-center gap-2.5 hover:border-emerald-400/60 hover:shadow-[0_0_25px_rgba(52,211,153,0.25)] active:scale-[0.98] transition-all group'
+        >
+          <div className='w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-300 shadow-inner group-hover:scale-110 transition-transform'>
+            <Globe size={24} className='text-emerald-300 drop-shadow-[0_0_8px_rgba(52,211,153,0.8)]' />
+          </div>
+          <div className='min-w-0 w-full'>
+            <h4 className='text-xs font-black uppercase italic text-white tracking-wide truncate'>
+              {comps['C2']?.name || 'Copa del Mundo'}
+            </h4>
+            <div className='mt-1'>
+              <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 inline-block'>
+                {comps['C2']?.phase === 'groups' ? 'Fase Grupos' : comps['C2']?.phase || '32 Países'}
+              </span>
+            </div>
           </div>
         </button>
       </div>
 
-      <section>
-        <h3 className='text-xs font-black uppercase text-slate-200 mb-4 flex items-center gap-2 drop-shadow-md tracking-wider'><Trophy size={14} className="text-yellow-400 drop-shadow-[0_0_8px_rgba(234,179,8,0.8)]" /> Torneos Internacionales</h3>
-        <div className='grid grid-cols-2 gap-4'>
-          {['C1', 'C2'].map(id => (
-            <button key={id} onClick={() => { setActiveCompId(id); setCompView('main'); setView('competition'); }} className='p-6 bg-slate-900/30 backdrop-blur-md rounded-[2rem] border border-white/10 flex flex-col items-center gap-4 hover:bg-slate-800/40 hover:border-white/20 hover:shadow-[0_0_25px_rgba(255,255,255,0.1)] active:scale-[0.98] transition-all duration-300 group'>
-              <div className={`w-14 h-14 rounded-full bg-slate-950/40 flex items-center justify-center text-white border border-white/5 shadow-inner group-hover:scale-110 transition-transform duration-300 ${id === 'C1' ? 'drop-shadow-[0_0_15px_rgba(96,165,250,0.5)]' : 'drop-shadow-[0_0_15px_rgba(52,211,153,0.5)]'}`}>
-                {id === 'C1' ? <Trophy size={28} className="text-blue-400" /> : <Globe size={28} className="text-emerald-400" />}
-              </div>
-              <div className='text-center'>
-                <h4 className='text-[11px] font-black uppercase italic text-white tracking-wide'>{comps[id]?.name}</h4>
-                <span className='text-[8px] font-bold px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm text-slate-100 mt-2 inline-block uppercase tracking-wider'>{comps[id]?.phase === 'groups' ? 'Fase Grupos' : comps[id]?.phase}</span>
-              </div>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <button onClick={() => setShowLeagues(!showLeagues)} className='w-full p-5 bg-slate-900/30 backdrop-blur-md rounded-[2rem] border border-white/10 flex items-center justify-between hover:bg-slate-800/50 hover:border-emerald-500/30 hover:shadow-[0_0_30px_rgba(52,211,153,0.15)] active:scale-[0.98] transition-all duration-300 group'>
-          <div className='flex items-center gap-4'>
-            <div className='w-14 h-14 rounded-2xl bg-emerald-500/20 flex items-center justify-center text-emerald-400 shadow-[inset_0_0_15px_rgba(52,211,153,0.2)] group-hover:scale-110 transition-transform duration-300'>
-              <ShieldIcon size={28} />
+      {/* LIGAS NACIONALES (ACORDEÓN ELEGANTE) */}
+      <section className='bg-slate-900/60 backdrop-blur-xl rounded-3xl border border-white/10 overflow-hidden shadow-xl'>
+        <button
+          onClick={() => setShowLeagues(!showLeagues)}
+          className='w-full p-4 flex items-center justify-between hover:bg-white/5 active:bg-white/10 transition-all text-left group'
+        >
+          <div className='flex items-center gap-3.5 min-w-0'>
+            <div className='w-11 h-11 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 shadow-inner group-hover:scale-105 transition-transform'>
+              <ShieldIcon size={20} />
             </div>
-            <div className='text-left'>
-              <h3 className='text-sm font-black uppercase italic text-white tracking-wide group-hover:text-emerald-50 transition-colors'>Ligas Nacionales</h3>
-              <p className='text-[10px] text-slate-300 font-bold uppercase tracking-widest mt-1'>1ª y 2ª División con Ascensos</p>
+            <div className='min-w-0'>
+              <h3 className='text-xs sm:text-sm font-black uppercase italic text-white tracking-wide truncate'>
+                Ligas Nacionales (7 Ligas)
+              </h3>
+              <p className='text-[9.5px] text-slate-300 font-bold uppercase tracking-wider mt-0.5'>
+                1ª y 2ª División · Ascensos y Descensos
+              </p>
             </div>
           </div>
-          <motion.div animate={{ rotate: showLeagues ? 90 : 0 }} transition={{ type: "spring", stiffness: 200 }} className='w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-slate-200 group-hover:bg-emerald-500/20 group-hover:text-emerald-400 transition-colors'>
-            <ArrowRight size={20} />
+          <motion.div
+            animate={{ rotate: showLeagues ? 180 : 0 }}
+            transition={{ type: "spring", stiffness: 220, damping: 20 }}
+            className='w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-slate-300 group-hover:text-white shrink-0 ml-2'
+          >
+            <ChevronLeft size={16} className='-rotate-90' />
           </motion.div>
         </button>
 
         <AnimatePresence>
           {showLeagues && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.3, ease: "easeInOut" }} className='overflow-hidden'>
-              <div className='grid grid-cols-1 gap-2 pt-4 px-2'>
-                {leagues.map(({id}) => {
-                  const comp = comps[id]; if (!comp) return null;
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.25, ease: "easeInOut" }}
+              className='overflow-hidden border-t border-white/10'
+            >
+              <div className='p-3 space-y-2 bg-black/20'>
+                {leagues.map(({ id, name, flag }) => {
+                  const comp = comps[id];
+                  if (!comp) return null;
                   const isConf = comp.teams && comp.teams.length > 0;
                   const isPending = pending.includes(id);
                   const finished = leagueSeasonOver(comp);
+
                   return (
-                    <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={id} className={'p-4 bg-slate-900/30 backdrop-blur-md rounded-[1.5rem] border flex items-center justify-between transition-all duration-200 group ' + (isPending ? 'border-amber-500/30' : 'border-white/5')}>
-                      <button onClick={() => { setActiveCompId(id); setCompView('main'); setView('competition'); }} className='flex items-center gap-4 flex-grow text-left'>
-                        <div className='w-10 h-10 rounded-xl bg-slate-950/40 flex items-center justify-center text-slate-200 border border-white/5 group-hover:text-emerald-400 group-hover:border-emerald-500/30 transition-all'><BarChart3 size={18} /></div>
-                        <div className='text-left'>
-                          <h4 className='text-xs font-black uppercase italic text-slate-100 group-hover:text-white transition-colors tracking-wide'>{comp.name}</h4>
-                          <p className={'text-[9px] font-bold uppercase tracking-wider mt-0.5 ' + (finished ? 'text-emerald-400' : 'text-slate-400')}>{isConf ? leagueProgressLabel(comp, globalMatchday) : 'No Inicializada'}</p>
-                          {isPending && <p className='text-[8px] font-black uppercase tracking-wider text-amber-400 mt-0.5'>Partidos pendientes</p>}
+                    <motion.div
+                      key={id}
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`p-3 rounded-2xl bg-slate-900/60 border flex items-center justify-between gap-3 transition-all ${
+                        isPending ? 'border-amber-500/40 bg-amber-950/10' : 'border-white/5 hover:border-white/20'
+                      }`}
+                    >
+                      <button
+                        onClick={() => { setActiveCompId(id); setCompView('main'); setView('competition'); }}
+                        className='flex items-center gap-3 min-w-0 flex-1 text-left'
+                      >
+                        <span className='text-2xl shrink-0 drop-shadow-sm'>{flag}</span>
+                        <div className='min-w-0'>
+                          <h4 className='text-xs font-black uppercase italic text-white tracking-wide truncate'>
+                            {comp.name || name}
+                          </h4>
+                          <p className={`text-[9px] font-bold uppercase tracking-wider mt-0.5 ${
+                            finished ? 'text-blue-400' : isPending ? 'text-amber-400' : 'text-slate-400'
+                          }`}>
+                            {isConf ? leagueProgressLabel(comp, globalMatchday) : 'No Inicializada'}
+                          </p>
                         </div>
                       </button>
+
                       {isPending ? (
-                        <button onClick={() => onSimulateLeague && onSimulateLeague(id)} className='shrink-0 bg-amber-500/90 text-slate-950 px-3 py-2 rounded-xl text-[8px] font-black uppercase italic tracking-widest active:scale-95 transition-all flex items-center gap-1'>
-                          <Dices size={12}/> Simular
+                        <button
+                          onClick={() => onSimulateLeague && onSimulateLeague(id)}
+                          className='shrink-0 px-3 py-1.5 bg-amber-500/90 hover:bg-amber-400 text-slate-950 rounded-xl text-[9px] font-black uppercase italic tracking-wider active:scale-95 transition-all flex items-center gap-1 shadow-md'
+                        >
+                          <Dices size={13} />
+                          <span>Simular</span>
                         </button>
                       ) : (
-                        <ArrowRight size={16} className='text-slate-400 group-hover:text-emerald-400 transition-colors' />
+                        <button
+                          onClick={() => { setActiveCompId(id); setCompView('main'); setView('competition'); }}
+                          className='shrink-0 w-8 h-8 rounded-xl bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white flex items-center justify-center transition-all'
+                        >
+                          <ArrowRight size={14} />
+                        </button>
                       )}
                     </motion.div>
-                  )
+                  );
                 })}
               </div>
             </motion.div>
           )}
         </AnimatePresence>
       </section>
+
+      {/* BOTONES AUXILIARES (HISTORIAL & REGLAS) */}
+      <div className='grid grid-cols-2 gap-3 pt-1'>
+        <button
+          onClick={() => setView('archive')}
+          className='p-3.5 bg-slate-900/60 backdrop-blur-xl rounded-2xl border border-white/10 flex items-center justify-center gap-2.5 hover:bg-slate-800/60 hover:border-amber-400/40 active:scale-[0.98] transition-all group'
+        >
+          <div className='w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-400 shrink-0 group-hover:scale-110 transition-transform'>
+            <History size={16} />
+          </div>
+          <div className='text-left min-w-0'>
+            <h4 className='text-xs font-black uppercase italic text-white truncate'>Historial</h4>
+            <p className='text-[8.5px] text-slate-400 font-bold uppercase tracking-wider truncate'>Palmarés</p>
+          </div>
+        </button>
+
+        <button
+          onClick={() => setView('rules')}
+          className='p-3.5 bg-slate-900/60 backdrop-blur-xl rounded-2xl border border-white/10 flex items-center justify-center gap-2.5 hover:bg-slate-800/60 hover:border-blue-400/40 active:scale-[0.98] transition-all group'
+        >
+          <div className='w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-400 shrink-0 group-hover:scale-110 transition-transform'>
+            <Info size={16} />
+          </div>
+          <div className='text-left min-w-0'>
+            <h4 className='text-xs font-black uppercase italic text-white truncate'>Reglamento</h4>
+            <p className='text-[8.5px] text-slate-400 font-bold uppercase tracking-wider truncate'>Sistema</p>
+          </div>
+        </button>
+      </div>
+
+      <footer className='pt-4 pb-2 text-center opacity-50'>
+        <p className='text-[8.5px] font-black uppercase tracking-widest text-slate-300'>
+          Dice Football Hub · Champions Night Edition
+        </p>
+      </footer>
     </div>
-    <footer className='py-6 text-center opacity-40'><p className='text-[9px] font-black uppercase tracking-widest text-white drop-shadow-md'>Powered by Dice Engine v6.0</p></footer>
-  </div>
-)};
+  );
+};
+
+const WC_POPULAR_SUGGESTIONS = [
+  { name: 'Japón', region: 'AS', flag: '🇯🇵' },
+  { name: 'Colombia', region: 'SA', flag: '🇨🇴' },
+  { name: 'México', region: 'NA', flag: '🇲🇽' },
+  { name: 'Noruega', region: 'EU', flag: '🇳🇴' },
+  { name: 'Nigeria', region: 'AF', flag: '🇳🇬' },
+  { name: 'Australia', region: 'AS', flag: '🇦🇺' },
+  { name: 'Egipto', region: 'AF', flag: '🇪🇬' },
+  { name: 'Chile', region: 'SA', flag: '🇨🇱' },
+  { name: 'Perú', region: 'SA', flag: '🇵🇪' },
+  { name: 'Uruguay', region: 'SA', flag: '🇺🇾' },
+  { name: 'USA', region: 'NA', flag: '🇺🇸' },
+  { name: 'Costa Rica', region: 'NA', flag: '🇨🇷' },
+  { name: 'Arabia Saudita', region: 'AS', flag: '🇸🇦' },
+  { name: 'Senegal', region: 'AF', flag: '🇸🇳' },
+  { name: 'Corea del Sur', region: 'AS', flag: '🇰🇷' },
+  { name: 'Marruecos', region: 'AF', flag: '🇲🇦' },
+  { name: 'Argelia', region: 'AF', flag: '🇩🇿' },
+  { name: 'Ecuador', region: 'SA', flag: '🇪🇨' },
+  { name: 'Canadá', region: 'NA', flag: '🇨🇦' },
+  { name: 'Panamá', region: 'NA', flag: '🇵🇦' },
+  { name: 'Paraguay', region: 'SA', flag: '🇵🇾' },
+  { name: 'Venezuela', region: 'SA', flag: '🇻🇪' },
+  { name: 'Ghana', region: 'AF', flag: '🇬🇭' },
+  { name: 'Camerún', region: 'AF', flag: '🇨🇲' },
+  { name: 'Costa de Marfil', region: 'AF', flag: '🇨🇮' },
+  { name: 'Turquía', region: 'EU', flag: '🇹🇷' },
+  { name: 'Serbia', region: 'EU', flag: '🇷🇸' },
+  { name: 'Suecia', region: 'EU', flag: '🇸🇪' },
+  { name: 'Polonia', region: 'EU', flag: '🇵🇱' },
+  { name: 'Dinamarca', region: 'EU', flag: '🇩🇰' },
+  { name: 'Austria', region: 'EU', flag: '🇦🇹' },
+  { name: 'Nueva Zelanda', region: 'OC', flag: '🇳🇿' },
+];
 
 const ConfigPanel = ({ initialComp, compId, onSave, onCancel, onTotalReset }) => {
   const [draft, setDraft] = useState(() => JSON.parse(JSON.stringify(initialComp)));
   const [editDiv, setEditDiv] = useState(1);
   const [drawModal, setDrawModal] = useState(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [validationWarningModal, setValidationWarningModal] = useState<{
+    type: 'excess' | 'deficit';
+    count: number;
+    diff: number;
+  } | null>(null);
 
   // Estados para anexar nuevos países a la Copa del Mundo
   const isWC = compId === 'C2' || draft.id === 'C2' || !!draft.isWorldCup || (draft.name || '').includes('Mundial') || (draft.name || '').includes('Copa del Mundo');
@@ -2261,11 +2487,34 @@ const ConfigPanel = ({ initialComp, compId, onSave, onCancel, onTotalReset }) =>
   const [newCountryColor1, setNewCountryColor1] = useState('#0033a0');
   const [newCountryColor2, setNewCountryColor2] = useState('#ffffff');
   const [newCountryRegion, setNewCountryRegion] = useState('EU');
-  const [annexToast, setAnnexToast] = useState(null);
+  const [annexToast, setAnnexToast] = useState<string | null>(null);
 
   const hasStarted = initialComp.type === 'league' 
     ? (initialComp.matchday > 0 || initialComp.matchday2 > 0 || initialComp.history?.length > 0)
     : (initialComp.matchday > 0 || initialComp.history?.length > 0);
+
+  const handleSaveAttempt = () => {
+    if (isWC) {
+      const count = (draft.teams || []).length;
+      if (count > 32) {
+        setValidationWarningModal({
+          type: 'excess',
+          count,
+          diff: count - 32
+        });
+        return;
+      }
+      if (count < 32) {
+        setValidationWarningModal({
+          type: 'deficit',
+          count,
+          diff: 32 - count
+        });
+        return;
+      }
+    }
+    onSave(draft);
+  };
 
   const currentTeams = editDiv === 2 ? draft.teams2 : draft.teams;
   const updateTeamAttr = (id, field, val) => {
@@ -2279,9 +2528,36 @@ const ConfigPanel = ({ initialComp, compId, onSave, onCancel, onTotalReset }) =>
   const handleCountryNameInput = (nameVal) => {
     setNewCountryName(nameVal);
     if (nameVal && nameVal.trim()) {
-      const inferred = inferCountryRegion(nameVal);
-      if (inferred) setNewCountryRegion(inferred);
+      const matchTeam = ALL_WORLD_CUP_TEAMS.find(t => t.name.toLowerCase() === nameVal.trim().toLowerCase());
+      if (matchTeam) {
+        setNewCountryAtt(matchTeam.att);
+        setNewCountryOpp(matchTeam.opp);
+        setNewCountryDef(matchTeam.def);
+        setNewCountryColor1(matchTeam.color1);
+        setNewCountryColor2(matchTeam.color2);
+        setNewCountryRegion(matchTeam.region);
+      } else {
+        const inferred = inferCountryRegion(nameVal);
+        if (inferred) setNewCountryRegion(inferred);
+      }
     }
+  };
+
+  const handleSelectQuickCountry = (sug) => {
+    const catalogEntry = ALL_WORLD_CUP_TEAMS.find(t => t.name.toLowerCase() === sug.name.toLowerCase());
+    setNewCountryName(sug.name);
+    if (catalogEntry) {
+      setNewCountryAtt(catalogEntry.att);
+      setNewCountryOpp(catalogEntry.opp);
+      setNewCountryDef(catalogEntry.def);
+      setNewCountryColor1(catalogEntry.color1);
+      setNewCountryColor2(catalogEntry.color2);
+      setNewCountryRegion(catalogEntry.region);
+    } else {
+      setNewCountryRegion(sug.region);
+    }
+    setAnnexToast(`Seleccionado: ${sug.name}. Pulsa "Anexar Selección" para añadirlo.`);
+    setTimeout(() => setAnnexToast(null), 3000);
   };
 
   const handleAnnexCountry = (e) => {
@@ -2311,14 +2587,21 @@ const ConfigPanel = ({ initialComp, compId, onSave, onCancel, onTotalReset }) =>
       p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0
     };
 
+    const newCount = existingList.length + 1;
     setDraft(prev => ({
       ...prev,
       teams: [...(prev.teams || []), newTeam]
     }));
 
     setNewCountryName('');
-    setAnnexToast(`¡Selección de ${cleanName} anexada a la Copa del Mundo!`);
-    setTimeout(() => setAnnexToast(null), 3500);
+    if (newCount > 32) {
+      setAnnexToast(`¡${cleanName} anexado! (Tienes ${newCount}/32: Recuerda eliminar ${newCount - 32} selección para poder guardar)`);
+    } else if (newCount === 32) {
+      setAnnexToast(`¡${cleanName} anexado! ¡Tienes las 32 selecciones completas!`);
+    } else {
+      setAnnexToast(`¡Selección de ${cleanName} anexada! (${newCount}/32 selecciones)`);
+    }
+    setTimeout(() => setAnnexToast(null), 4000);
   };
 
   const handleRemoveTeam = (teamId) => {
@@ -2329,13 +2612,37 @@ const ConfigPanel = ({ initialComp, compId, onSave, onCancel, onTotalReset }) =>
     }));
   };
 
+  const handleGenerateAndDrawWC = () => {
+    if (hasStarted) return;
+    const fresh = buildDynamicWCPool({ randomize: true, customTeams: [] });
+    const pool = fresh.slice(0, 32).map((t, i) => ({ ...t, id: i + 1, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }));
+    pool.sort((a, b) => (b.att + b.opp + b.def) - (a.att + a.opp + a.def));
+    const pots = [
+      pool.slice(0, 8), pool.slice(8, 16),
+      pool.slice(16, 24), pool.slice(24, 32)
+    ];
+    const drawData = drawKnockoutGroups(pool, true, true);
+    setDraft(prev => ({
+      ...prev,
+      teams: drawData.teams,
+      groups: drawData.groups,
+      phase: 'groups',
+      matchday: 0,
+      history: [],
+      bracket: null,
+      showWinner: false
+    }));
+    setDrawModal({ step: 'groups', pots, groups: drawData.groups, drawData });
+    setAnnexToast('¡32 selecciones oficiales generadas y sorteadas en 8 grupos A-H!');
+    setTimeout(() => setAnnexToast(null), 3500);
+  };
+
   const handleDrawUI = (type) => {
     if (hasStarted) return;
     const isWCTournament = isWC;
     let pool = [];
 
     if (isWCTournament) {
-      // Usar selecciones configuradas si existen y completar con el catálogo continental ampliado
       const customTeams = draft.teams && draft.teams.length > 0 ? [...draft.teams] : [];
       pool = buildDynamicWCPool({ randomize: type === 'shuffle', customTeams });
     } else {
@@ -2358,185 +2665,379 @@ const ConfigPanel = ({ initialComp, compId, onSave, onCancel, onTotalReset }) =>
   const regionLabels = {
     EU: 'UEFA (Europa)',
     SA: 'CONMEBOL (Sudamérica)',
-    NA: 'CONCACAF (N. y C. América)',
+    NA: 'CONCACAF (Norte/Centro)',
     AF: 'CAF (África)',
-    AS: 'AFC (Asia / O. Medio)',
+    AS: 'AFC (Asia/M.Oriente)',
     OC: 'OFC (Oceanía)'
   };
 
   return (
-    <div className='flex-grow px-4 pb-28 relative'>
+    <div className='flex-grow px-3 sm:px-4 pb-32 relative'>
       {drawModal && (
-          <div className='fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-md flex flex-col p-6 overflow-y-auto custom-scrollbar'>
-              <h2 className='text-2xl font-black uppercase italic text-yellow-400 text-center mb-6 mt-4 drop-shadow-md'>
-                  {drawModal.step === 'pots' ? 'Bombos Generados' : 'Sorteo Finalizado'}
-              </h2>
-              {drawModal.step === 'pots' ? (
-                  <div className='space-y-4 mb-20'>
-                       <p className='text-[10px] text-center text-slate-300 font-bold mb-4 uppercase'>Equipos ordenados por ranking de fuerza en 4 bombos.</p>
-                       {drawModal.pots.map((pot, i) => (
-                           <div key={i} className='bg-slate-900/50 p-4 rounded-2xl border border-white/10'>
-                               <h3 className='text-sm font-black uppercase text-blue-400 mb-3 flex items-center gap-2'><ShieldIcon size={14}/> Bombo {i+1}</h3>
-                               <div className='grid grid-cols-2 gap-2'>
-                                   {pot.map(t => (
-                                       <div key={t.id} className='flex items-center gap-2 text-[10px] bg-black/30 p-2 rounded-xl border border-white/5'>
-                                          <Shield color1={t.color1} color2={t.color2} initial={t.name} size='xs' isFlag={t.isFlag} />
-                                          <span className='font-bold uppercase truncate'>{t.name}</span>
-                                       </div>
-                                   ))}
-                               </div>
-                           </div>
-                       ))}
-                       <button onClick={() => setDrawModal({...drawModal, step: 'groups'})} className='w-full mt-6 bg-emerald-600 py-4 rounded-xl font-black uppercase italic text-white active:scale-95 shadow-lg shadow-emerald-500/20 transition-all'>Asignar a Grupos (A-H)</button>
-                  </div>
-              ) : (
-                  <div className='space-y-4 mb-20'>
-                       <p className='text-[10px] text-center text-slate-300 font-bold mb-4 uppercase'>Grupos formados respetando reglas de confederación.</p>
-                       <div className='grid grid-cols-1 gap-4'>
-                           {drawModal.groups.map((g, i) => (
-                               <div key={i} className='bg-slate-900/50 p-4 rounded-2xl border border-white/10'>
-                                   <h3 className='text-[11px] font-black uppercase text-emerald-400 mb-2 flex justify-between'>
-                                      <span>{g.name}</span>
-                                   </h3>
-                                   <div className='space-y-1.5'>
-                                       {g.teamIds.map(id => {
-                                           const t = drawModal.drawData.teams.find(x => x.id === id);
-                                           return (
-                                               <div key={id} className='flex items-center justify-between text-[10px] bg-black/30 p-2 rounded-xl border border-white/5'>
-                                                   <div className='flex items-center gap-2'>
-                                                       <Shield color1={t?.color1} color2={t?.color2} initial={t?.name} size='xs' isFlag={t?.isFlag} />
-                                                       <span className='font-bold uppercase'>{t?.name}</span>
-                                                   </div>
-                                               </div>
-                                           );
-                                       })}
+          <div className='fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-md flex flex-col p-4 sm:p-6 overflow-y-auto custom-scrollbar'>
+              <div className='max-w-lg mx-auto w-full flex flex-col min-h-full'>
+                <h2 className='text-xl sm:text-2xl font-black uppercase italic text-yellow-400 text-center mb-4 sm:mb-6 mt-2 drop-shadow-md'>
+                    {drawModal.step === 'pots' ? 'Bombos Generados' : 'Sorteo de Grupos (A - H)'}
+                </h2>
+                {drawModal.step === 'pots' ? (
+                    <div className='space-y-4 mb-6 flex-grow flex flex-col'>
+                         <p className='text-[10px] text-center text-slate-300 font-bold uppercase'>Equipos ordenados por ranking de fuerza en 4 bombos.</p>
+                         <div className='space-y-3 flex-grow'>
+                           {drawModal.pots.map((pot, i) => (
+                               <div key={i} className='bg-slate-900/50 p-3.5 rounded-2xl border border-white/10'>
+                                   <h3 className='text-xs sm:text-sm font-black uppercase text-blue-400 mb-2.5 flex items-center gap-2'><ShieldIcon size={14}/> Bombo {i+1}</h3>
+                                   <div className='grid grid-cols-2 gap-2'>
+                                       {pot.map(t => (
+                                           <div key={t.id} className='flex items-center gap-2 text-[10px] bg-black/30 p-2 rounded-xl border border-white/5'>
+                                              <Shield color1={t.color1} color2={t.color2} initial={t.name} size='xs' isFlag={t.isFlag} />
+                                              <span className='font-bold uppercase truncate'>{t.name}</span>
+                                           </div>
+                                       ))}
                                    </div>
                                </div>
                            ))}
-                       </div>
-                       <div className='flex gap-3 mt-6'>
-                          <button onClick={() => setDrawModal(null)} className='flex-1 bg-slate-800 border border-white/10 py-4 rounded-xl font-black uppercase italic text-white active:scale-95 transition-all'>Cancelar</button>
-                          <button onClick={() => { setDraft(prev => ({...prev, ...drawModal.drawData})); setDrawModal(null); }} className='flex-[2] bg-blue-600 py-4 rounded-xl font-black uppercase italic text-white active:scale-95 shadow-lg shadow-blue-500/20 transition-all'>Confirmar y Guardar</button>
-                       </div>
-                  </div>
-              )}
+                         </div>
+                         <div className='sticky bottom-2 pt-2 bg-slate-950/80 backdrop-blur-md'>
+                           <button onClick={() => setDrawModal({...drawModal, step: 'groups'})} className='w-full bg-gradient-to-r from-emerald-600 to-teal-600 py-3.5 px-4 rounded-2xl font-black uppercase italic text-white text-xs sm:text-sm active:scale-95 shadow-lg shadow-emerald-500/25 transition-all border border-emerald-400/40'>Asignar a Grupos (A-H)</button>
+                         </div>
+                    </div>
+                ) : (
+                    <div className='space-y-4 mb-6 flex-grow flex flex-col'>
+                         <p className='text-[10px] text-center text-slate-300 font-bold uppercase'>8 Grupos formados respetando reglas continentales oficiales.</p>
+                         <div className='grid grid-cols-1 sm:grid-cols-2 gap-3 flex-grow'>
+                             {drawModal.groups.map((g, i) => (
+                                 <div key={i} className='bg-slate-900/50 p-3 rounded-2xl border border-white/10'>
+                                     <h3 className='text-[11px] font-black uppercase text-emerald-400 mb-2 flex justify-between'>
+                                        <span>{g.name}</span>
+                                     </h3>
+                                     <div className='space-y-1.5'>
+                                         {g.teamIds.map(id => {
+                                             const t = drawModal.drawData.teams.find(x => x.id === id);
+                                             return (
+                                                 <div key={id} className='flex items-center justify-between text-[10px] bg-black/30 p-2 rounded-xl border border-white/5'>
+                                                     <div className='flex items-center gap-2 min-w-0'>
+                                                         <Shield color1={t?.color1} color2={t?.color2} initial={t?.name} size='xs' isFlag={t?.isFlag} />
+                                                         <span className='font-bold uppercase truncate'>{t?.name}</span>
+                                                     </div>
+                                                 </div>
+                                             );
+                                         })}
+                                     </div>
+                                 </div>
+                             ))}
+                         </div>
+                         <div className='sticky bottom-2 pt-3 bg-slate-950/80 backdrop-blur-md flex gap-2.5'>
+                            <button onClick={() => setDrawModal(null)} className='flex-1 bg-slate-900 border border-white/10 py-3.5 rounded-2xl font-black uppercase italic text-slate-300 text-xs active:scale-95 transition-all'>Cerrar</button>
+                            <button onClick={() => { setDraft(prev => ({...prev, ...drawModal.drawData})); setDrawModal(null); }} className='flex-[2] bg-gradient-to-r from-blue-600 to-indigo-600 py-3.5 px-3 rounded-2xl font-black uppercase italic text-white text-xs sm:text-sm active:scale-95 shadow-lg shadow-blue-500/25 transition-all border border-blue-400/40 flex items-center justify-center gap-1.5'><Check size={16} /> Confirmar y Guardar</button>
+                         </div>
+                    </div>
+                )}
+              </div>
           </div>
       )}
 
-      <div className='flex items-center gap-3 mb-6'>
-        <button onClick={onCancel} className='p-2 bg-slate-900/30 backdrop-blur-md rounded-xl active:scale-95 transition-all border border-white/10'><ChevronLeft /></button>
-        <div className='flex items-center gap-2'>
-          <h2 className='text-xl font-black italic uppercase drop-shadow-md'>Ajustes</h2>
-          {isWC && <span className='text-[10px] bg-yellow-500/20 text-yellow-300 font-black px-2.5 py-0.5 rounded-full border border-yellow-500/30 uppercase'>Copa del Mundo</span>}
+      {/* HEADER DE AJUSTES CON ACCESO DIRECTO A GUARDAR */}
+      <div className='flex items-center justify-between gap-2 mb-4 bg-slate-900/50 backdrop-blur-md p-3 rounded-2xl border border-white/10'>
+        <div className='flex items-center gap-2.5 min-w-0'>
+          <button onClick={onCancel} className='p-2 bg-slate-900/80 hover:bg-slate-800 rounded-xl active:scale-95 transition-all border border-white/10 shrink-0 text-slate-300 hover:text-white'><ChevronLeft size={20} /></button>
+          <div className='min-w-0'>
+            <div className='flex items-center gap-2'>
+              <h2 className='text-base sm:text-lg font-black italic uppercase drop-shadow-md text-white truncate'>
+                {isWC ? 'Copa del Mundo' : 'Ajustes'}
+              </h2>
+              {isWC && <span className='text-[8px] bg-yellow-500/20 text-yellow-300 font-black px-2 py-0.5 rounded-full border border-yellow-500/30 uppercase shrink-0'>Config</span>}
+            </div>
+            <p className='text-[8px] font-bold text-slate-400 uppercase tracking-wider truncate'>
+              {isWC ? 'Gestión de selecciones y sorteo' : 'Edición de equipos y atributos'}
+            </p>
+          </div>
         </div>
+        <button
+          onClick={handleSaveAttempt}
+          className='bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-3.5 py-2 rounded-xl font-black text-[10px] sm:text-xs uppercase italic tracking-wider flex items-center gap-1.5 shadow-lg shadow-blue-500/25 active:scale-95 transition-all border border-blue-400/40 shrink-0'
+        >
+          <Save size={14} /> Guardar
+        </button>
       </div>
 
       {annexToast && (
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className='mb-4 p-3 bg-emerald-500/20 border border-emerald-500/40 rounded-2xl text-emerald-300 text-xs font-black uppercase text-center shadow-lg flex items-center justify-center gap-2'>
-          <Sparkles size={14} className='text-emerald-400' /> {annexToast}
+          <Sparkles size={14} className='text-emerald-400 shrink-0' /> <span>{annexToast}</span>
         </motion.div>
       )}
 
-      {/* SECCIÓN ESPECIAL: ANEXAR PAÍSES A LA COPA DEL MUNDO */}
+      {/* SECCIÓN ESPECIAL Y PRINCIPAL: GESTIÓN DE COPA DEL MUNDO */}
       {isWC && (
-        <div className='bg-gradient-to-br from-slate-900/90 via-indigo-950/40 to-slate-900/90 backdrop-blur-md rounded-3xl p-5 border-2 border-indigo-500/30 shadow-2xl mb-6 space-y-4'>
-          <div className='flex items-center justify-between'>
-            <div className='flex items-center gap-2'>
-              <div className='w-8 h-8 rounded-xl bg-indigo-500/20 flex items-center justify-center border border-indigo-500/40 text-indigo-300'>
-                <Globe size={18} />
+        <div className='space-y-4 mb-6'>
+          {/* PANEL 1: ESTADO DEL MUNDIAL Y GENERACIÓN EN 1 CLIC */}
+          <div className='bg-gradient-to-br from-indigo-950/70 via-slate-900/90 to-blue-950/70 backdrop-blur-md rounded-3xl p-4 sm:p-5 border-2 border-indigo-500/30 shadow-2xl space-y-3.5'>
+            <div className='flex items-center justify-between'>
+              <div className='flex items-center gap-2.5'>
+                <div className='w-10 h-10 rounded-2xl bg-indigo-500/20 flex items-center justify-center border border-indigo-500/40 text-indigo-300 shadow-inner'>
+                  <Globe size={22} className='text-indigo-400 animate-pulse' />
+                </div>
+                <div>
+                  <h3 className='text-sm sm:text-base font-black uppercase italic text-white'>Copa del Mundo</h3>
+                  <p className='text-[9px] text-indigo-200 font-bold uppercase tracking-wider'>32 Selecciones en 8 Grupos (A - H)</p>
+                </div>
               </div>
-              <div>
-                <h3 className='text-sm font-black uppercase italic text-indigo-300'>Anexar Selección Nacional</h3>
-                <p className='text-[10px] text-slate-400 font-bold'>Agrega nuevos países con bandera automática y confederación</p>
+              <div className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase border ${
+                (draft.teams || []).length === 32
+                  ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
+                  : 'bg-amber-950/60 text-amber-300 border-amber-500/40'
+              }`}>
+                {(draft.teams || []).length} / 32
               </div>
             </div>
-            <span className='text-[10px] font-black bg-indigo-900/50 text-indigo-200 px-2.5 py-1 rounded-xl border border-indigo-500/30'>
-              {(draft.teams || []).length} Países
-            </span>
+
+            {/* BOTÓN PRINCIPAL DE GENERACIÓN INSTANTÁNEA */}
+            <button
+              onClick={handleGenerateAndDrawWC}
+              disabled={hasStarted}
+              className={`w-full py-3.5 px-4 rounded-2xl text-[10px] sm:text-xs font-black uppercase italic tracking-wider flex items-center justify-center gap-2 transition-all shadow-xl active:scale-95 ${
+                hasStarted
+                  ? 'opacity-40 cursor-not-allowed bg-indigo-950/20 border border-indigo-500/10 text-indigo-400/50'
+                  : 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white border-2 border-emerald-400/50 shadow-emerald-500/25'
+              }`}
+            >
+              <Wand2 size={16} className='text-yellow-300' /> Generar 32 Selecciones Oficiales y Sortear Grupos
+            </button>
+
+            <div className='grid grid-cols-2 gap-2'>
+              <button
+                onClick={() => handleDrawUI('auto')}
+                disabled={hasStarted}
+                className={`py-2.5 px-3 border rounded-xl text-[9px] font-black uppercase italic flex items-center justify-center gap-1.5 transition-all backdrop-blur-md ${
+                  hasStarted
+                    ? 'opacity-40 cursor-not-allowed bg-yellow-900/20 border-yellow-500/10 text-yellow-500/50'
+                    : 'bg-yellow-600/20 text-yellow-200 border-yellow-500/40 hover:bg-yellow-600/30 active:scale-95'
+                }`}
+              >
+                <ShieldIcon size={13} className='text-yellow-400'/> Sorteo por Bombos
+              </button>
+              <button
+                onClick={() => handleDrawUI('shuffle')}
+                disabled={hasStarted}
+                className={`py-2.5 px-3 border rounded-xl text-[9px] font-black uppercase italic flex items-center justify-center gap-1.5 transition-all backdrop-blur-md ${
+                  hasStarted
+                    ? 'opacity-40 cursor-not-allowed bg-indigo-900/20 border-indigo-500/10 text-indigo-500/50'
+                    : 'bg-indigo-600/20 text-indigo-200 border-indigo-500/40 hover:bg-indigo-600/30 active:scale-95'
+                }`}
+              >
+                <Shuffle size={13} className='text-indigo-400'/> Sorteo Aleatorio
+              </button>
+            </div>
+
+            {hasStarted && (
+              <p className='text-[8px] text-center text-amber-300 font-bold uppercase italic mt-1'>
+                Torneo en curso. Para sortear de nuevo, concluye la edición o reinicia la competición.
+              </p>
+            )}
           </div>
 
-          <div className='flex items-center gap-4 bg-black/40 p-3.5 rounded-2xl border border-white/10'>
-            <Shield color1={newCountryColor1} color2={newCountryColor2} initial={newCountryName || 'País'} size='md' isFlag={true} />
-            <div className='flex-grow space-y-2'>
-              <div>
-                <label className='text-[9px] font-black uppercase text-slate-400 block mb-1'>Nombre del País / Selección:</label>
-                <input
-                  type='text'
-                  value={newCountryName}
-                  onChange={(e) => handleCountryNameInput(e.target.value)}
-                  placeholder='Ej: Venezuela, Costa Rica, Noruega, Japón...'
-                  className='bg-black/50 w-full rounded-xl px-3 py-2 text-xs font-black italic uppercase border border-white/20 focus:border-indigo-400 focus:bg-slate-900 outline-none text-white transition-all placeholder:text-slate-600'
-                />
-              </div>
+          {/* PANEL 2: ANEXAR / PERSONALIZAR PAÍSES DE FORMA INTUITIVA */}
+          <div className='bg-slate-900/40 backdrop-blur-md rounded-3xl p-4 sm:p-5 border border-white/10 shadow-xl space-y-4'>
+            <div className='flex items-center justify-between'>
               <div className='flex items-center gap-2'>
-                {detectedCode ? (
-                  <span className='text-[9px] font-black uppercase text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-500/30 flex items-center gap-1'>
-                    <Check size={10} /> Bandera oficial: {detectedCode.toUpperCase()}
-                  </span>
-                ) : newCountryName.trim() ? (
-                  <span className='text-[9px] font-black uppercase text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-500/30 flex items-center gap-1'>
-                    <Flag size={10} /> Escudo bicolor configurable
-                  </span>
-                ) : null}
+                <div className='w-8 h-8 rounded-xl bg-blue-500/20 flex items-center justify-center border border-blue-500/30 text-blue-300'>
+                  <Plus size={16} />
+                </div>
+                <div>
+                  <h4 className='text-xs sm:text-sm font-black uppercase italic text-white'>Anexar Selección</h4>
+                  <p className='text-[8px] text-slate-400 font-bold uppercase tracking-wider'>Elige una sugerencia o escribe un país</p>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className='space-y-3 bg-black/20 p-3.5 rounded-2xl border border-white/5'>
+            {/* SUGERENCIAS RÁPIDAS EN CHIPS SCROLLEABLES */}
             <div>
-              <label className='text-[9px] font-black uppercase text-slate-400 block mb-1.5'>Confederación / Región:</label>
-              <div className='grid grid-cols-3 gap-1.5'>
-                {Object.entries(regionLabels).map(([code, label]) => (
+              <label className='text-[8px] font-black uppercase text-slate-400 block mb-1.5'>
+                Sugerencias Rápidas (1 toque para rellenar datos oficiales):
+              </label>
+              <div className='flex gap-1.5 overflow-x-auto pb-1.5 custom-scrollbar no-scrollbar -mx-1 px-1'>
+                {WC_POPULAR_SUGGESTIONS.map(sug => (
                   <button
-                    key={code}
+                    key={sug.name}
                     type='button'
-                    onClick={() => setNewCountryRegion(code)}
-                    className={`py-1.5 px-2 rounded-xl text-[9px] font-black uppercase italic transition-all border ${
-                      newCountryRegion === code
-                        ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-500/30 scale-[1.02]'
-                        : 'bg-slate-900/60 text-slate-400 border-white/5 hover:text-white'
-                    }`}
+                    onClick={() => handleSelectQuickCountry(sug)}
+                    className='shrink-0 bg-slate-800/80 hover:bg-slate-700/80 active:scale-95 transition-all text-slate-200 border border-white/10 rounded-xl px-2.5 py-1.5 text-[9px] font-bold flex items-center gap-1.5'
                   >
-                    {code} · {code === 'EU' ? 'UEFA' : code === 'SA' ? 'CONMEBOL' : code === 'NA' ? 'CONCACAF' : code === 'AF' ? 'CAF' : code === 'AS' ? 'AFC' : 'OFC'}
+                    <span>{sug.flag}</span>
+                    <span>{sug.name}</span>
                   </button>
                 ))}
               </div>
             </div>
 
-            <div className='grid grid-cols-3 gap-2'>
-              <AttrStepper label="Atk (1-5)" val={newCountryAtt} min={1} max={5} onUpdate={(v) => setNewCountryAtt(v)} />
-              <AttrStepper label="Opp (1-5)" val={newCountryOpp} min={1} max={5} onUpdate={(v) => setNewCountryOpp(v)} />
-              <AttrStepper label="Def (1-4)" val={newCountryDef} min={1} max={4} onUpdate={(v) => setNewCountryDef(v)} />
-            </div>
-
-            <div className='flex items-center justify-between pt-1 border-t border-white/5'>
-              <span className='text-[9px] font-black uppercase text-slate-400'>Colores de Escudo/Camiseta:</span>
-              <div className='flex gap-2 bg-black/40 p-1 rounded-xl border border-white/5'>
-                <input type='color' value={newCountryColor1} onChange={(e) => setNewCountryColor1(e.target.value)} className='w-7 h-7 rounded-lg bg-transparent cursor-pointer border-none p-0' title='Color Principal' />
-                <input type='color' value={newCountryColor2} onChange={(e) => setNewCountryColor2(e.target.value)} className='w-7 h-7 rounded-lg bg-transparent cursor-pointer border-none p-0' title='Color Secundario' />
+            {/* FORMULARIO DE PAÍS CON PREVIEW */}
+            <div className='space-y-3 bg-black/30 p-3.5 rounded-2xl border border-white/5'>
+              <div className='flex items-center gap-3'>
+                <Shield color1={newCountryColor1} color2={newCountryColor2} initial={newCountryName || 'País'} size='md' isFlag={true} />
+                <div className='flex-grow space-y-1.5'>
+                  <input
+                    type='text'
+                    value={newCountryName}
+                    onChange={(e) => handleCountryNameInput(e.target.value)}
+                    placeholder='Escribe un país (Ej: Japón, Colombia, Noruega...)'
+                    className='bg-black/60 w-full rounded-xl px-3 py-2 text-xs font-black italic uppercase border border-white/15 focus:border-indigo-400 focus:bg-slate-900 outline-none text-white transition-all placeholder:text-slate-500'
+                  />
+                  <div className='flex items-center gap-1.5 flex-wrap'>
+                    {detectedCode ? (
+                      <span className='text-[8px] font-black uppercase text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-500/30 flex items-center gap-1'>
+                        <Check size={9} /> Bandera oficial: {detectedCode.toUpperCase()}
+                      </span>
+                    ) : newCountryName.trim() ? (
+                      <span className='text-[8px] font-black uppercase text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-500/30 flex items-center gap-1'>
+                        <Flag size={9} /> Escudo bicolor configurable
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
               </div>
+
+              {/* SELECTOR DE CONFEDERACIÓN */}
+              <div>
+                <label className='text-[8px] font-black uppercase text-slate-400 block mb-1'>Confederación:</label>
+                <div className='grid grid-cols-3 sm:grid-cols-6 gap-1'>
+                  {Object.entries(regionLabels).map(([code, label]) => (
+                    <button
+                      key={code}
+                      type='button'
+                      onClick={() => setNewCountryRegion(code)}
+                      className={`py-1.5 px-1 rounded-xl text-[8px] font-black uppercase italic transition-all border text-center truncate ${
+                        newCountryRegion === code
+                          ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-500/30 scale-[1.02]'
+                          : 'bg-slate-900/60 text-slate-400 border-white/5 hover:text-white'
+                      }`}
+                      title={label}
+                    >
+                      {code === 'EU' ? 'UEFA' : code === 'SA' ? 'CONMEBOL' : code === 'NA' ? 'CONCACAF' : code === 'AF' ? 'CAF' : code === 'AS' ? 'AFC' : 'OFC'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* STEPPERS DE ATRIBUTOS */}
+              <div className='grid grid-cols-3 gap-2 pt-1'>
+                <AttrStepper label="Atk (1-5)" val={newCountryAtt} min={1} max={5} onUpdate={(v) => setNewCountryAtt(v)} />
+                <AttrStepper label="Opp (1-5)" val={newCountryOpp} min={1} max={5} onUpdate={(v) => setNewCountryOpp(v)} />
+                <AttrStepper label="Def (1-4)" val={newCountryDef} min={1} max={4} onUpdate={(v) => setNewCountryDef(v)} />
+              </div>
+
+              {/* COLORES */}
+              <div className='flex items-center justify-between pt-1 border-t border-white/5'>
+                <span className='text-[8px] font-black uppercase text-slate-400'>Colores de Escudo/Camiseta:</span>
+                <div className='flex gap-2 bg-black/40 p-1 rounded-xl border border-white/5'>
+                  <input type='color' value={newCountryColor1} onChange={(e) => setNewCountryColor1(e.target.value)} className='w-7 h-7 rounded-lg bg-transparent cursor-pointer border-none p-0' title='Color Principal' />
+                  <input type='color' value={newCountryColor2} onChange={(e) => setNewCountryColor2(e.target.value)} className='w-7 h-7 rounded-lg bg-transparent cursor-pointer border-none p-0' title='Color Secundario' />
+                </div>
+              </div>
+
+              <button
+                onClick={handleAnnexCountry}
+                disabled={!newCountryName.trim()}
+                className={`w-full py-3 rounded-2xl font-black uppercase italic tracking-widest text-xs flex items-center justify-center gap-2 transition-all shadow-lg active:scale-95 ${
+                  newCountryName.trim()
+                    ? 'bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-600 text-white border border-indigo-400 shadow-indigo-500/25 hover:shadow-indigo-500/40 cursor-pointer'
+                    : 'bg-slate-800/50 text-slate-500 border border-white/5 cursor-not-allowed'
+                }`}
+              >
+                <Plus size={15} /> Anexar Selección a la Copa
+              </button>
             </div>
           </div>
-
-          <button
-            onClick={handleAnnexCountry}
-            disabled={!newCountryName.trim()}
-            className={`w-full py-3.5 rounded-2xl font-black uppercase italic tracking-widest text-xs flex items-center justify-center gap-2 transition-all shadow-lg active:scale-95 ${
-              newCountryName.trim()
-                ? 'bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-600 text-white border border-indigo-400 shadow-indigo-500/25 hover:shadow-indigo-500/40 cursor-pointer'
-                : 'bg-slate-800/50 text-slate-500 border border-white/5 cursor-not-allowed'
-            }`}
-          >
-            <Plus size={16} /> Anexar País a la Copa del Mundo
-          </button>
         </div>
       )}
 
-      <div className='bg-slate-900/30 backdrop-blur-md rounded-2xl p-4 border border-white/10 shadow-lg mb-6'>
-        <h3 className='text-xs font-black text-red-400 uppercase italic mb-3 flex items-center gap-2'><AlertTriangle size={14}/> Zona de Peligro</h3>
-        <button onClick={() => setShowResetConfirm(true)} className='w-full py-4 bg-gradient-to-r from-red-700/60 via-red-600/50 to-red-700/60 text-red-200 font-black uppercase tracking-widest text-[11px] rounded-2xl border-2 border-red-500/40 active:scale-95 transition-all shadow-[0_0_25px_rgba(239,68,68,0.2)] hover:shadow-[0_0_35px_rgba(239,68,68,0.35)] hover:border-red-400/60 flex items-center justify-center gap-2 italic'>
-           <RotateCcw size={15} className='text-red-300'/> Reiniciar Competición
-         </button>
+      {draft.type === 'league' && (
+        <div className='flex mb-4 bg-slate-900/50 p-1 rounded-2xl border border-white/10 backdrop-blur-sm'>
+          <button onClick={() => setEditDiv(1)} className={`flex-1 py-2 text-[10px] font-black uppercase italic rounded-xl transition-all ${editDiv === 1 ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`}>1ª División</button>
+          <button onClick={() => setEditDiv(2)} className={`flex-1 py-2 text-[10px] font-black uppercase italic rounded-xl transition-all ${editDiv === 2 ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`}>2ª División</button>
+        </div>
+      )}
+
+      {/* LISTA DE EQUIPOS / SELECCIONES CONFIGURADAS */}
+      <div className='flex items-center justify-between mb-3 px-1'>
+        <h3 className='text-xs font-black uppercase italic text-slate-300'>
+          {isWC ? `Selecciones Actuales (${(currentTeams || []).length})` : `Equipos Configurados (${(currentTeams || []).length})`}
+        </h3>
+        {isWC && <span className='text-[8px] text-slate-400 font-bold uppercase'>Cupo Oficial: 32</span>}
+      </div>
+
+      <div className='grid gap-3'>
+        {(!Array.isArray(currentTeams) || currentTeams.length === 0) && (
+          <div className='text-center py-8 bg-slate-900/30 backdrop-blur-md rounded-[2rem] border border-dashed border-white/20 space-y-2'>
+            <Globe size={28} className='mx-auto text-slate-500 opacity-60' />
+            <p className='text-[10px] font-bold text-slate-300 uppercase italic'>No hay selecciones en la lista.</p>
+            {isWC && (
+              <button
+                onClick={handleGenerateAndDrawWC}
+                className='px-4 py-2 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase italic tracking-wider active:scale-95'
+              >
+                Generar 32 Selecciones Oficiales
+              </button>
+            )}
+          </div>
+        )}
+        {Array.isArray(currentTeams) && currentTeams.map((t, idx) => (
+          <div key={t.id} className='bg-slate-900/40 backdrop-blur-md p-3.5 sm:p-4 rounded-2xl border border-white/10 shadow-md space-y-2.5 relative group'>
+            <div className='flex items-center gap-3'>
+              <div className='flex items-center justify-center shrink-0'>
+                <Shield color1={t?.color1} color2={t?.color2} initial={t?.name} size='md' isFlag={t?.isFlag} />
+              </div>
+              <div className='flex-grow min-w-0'>
+                <div className='flex items-center gap-2'>
+                  <span className='text-[9px] font-black text-slate-400 shrink-0'>#{idx + 1}</span>
+                  <input
+                    className='bg-black/40 w-full rounded-xl px-2.5 py-1.5 text-xs font-black italic uppercase border border-white/10 focus:border-blue-500 focus:bg-slate-800/80 outline-none text-white transition-colors backdrop-blur-sm'
+                    value={t?.name}
+                    onChange={(e) => updateTeamAttr(t.id, 'name', e.target.value)}
+                  />
+                  {isWC && !hasStarted && (
+                    <button
+                      onClick={() => handleRemoveTeam(t.id)}
+                      title='Eliminar selección'
+                      className='p-2 bg-red-950/40 border border-red-500/30 text-red-400 hover:bg-red-900/60 rounded-xl transition-all active:scale-95 shrink-0'
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+
+                {isWC && t.region && (
+                  <div className='mt-1 flex items-center gap-1.5'>
+                    <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-md bg-indigo-950/70 text-indigo-300 border border-indigo-500/30'>
+                      {regionLabels[t.region] || t.region}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className='grid grid-cols-3 gap-1.5 pt-1'>
+              <AttrStepper label="Atk (1-5)" val={t.att} min={1} max={5} onUpdate={(v) => updateTeamAttr(t.id, 'att', v)} />
+              <AttrStepper label="Opp (1-5)" val={t.opp} min={1} max={5} onUpdate={(v) => updateTeamAttr(t.id, 'opp', v)} />
+              <AttrStepper label="Def (1-4)" val={t.def} min={1} max={4} onUpdate={(v) => updateTeamAttr(t.id, 'def', v)} />
+            </div>
+
+            <div className='flex items-center justify-between pt-1 border-t border-white/5'>
+              <span className='text-[8px] font-bold text-slate-400 uppercase'>Colores</span>
+              <div className='flex gap-2 bg-black/40 p-1 rounded-xl border border-white/5'>
+                <input type='color' value={t.color1} onChange={(e) => updateTeamAttr(t.id, 'color1', e.target.value)} className='w-6 h-6 rounded-lg bg-transparent cursor-pointer border-none p-0' />
+                <input type='color' value={t.color2} onChange={(e) => updateTeamAttr(t.id, 'color2', e.target.value)} className='w-6 h-6 rounded-lg bg-transparent cursor-pointer border-none p-0' />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ZONA DE PELIGRO UBICADA AL FINAL */}
+      <div className='mt-8 bg-slate-900/30 backdrop-blur-md rounded-2xl p-4 border border-red-500/20 shadow-lg'>
+        <h3 className='text-xs font-black text-red-400 uppercase italic mb-2 flex items-center gap-2'><AlertTriangle size={14}/> Zona de Peligro</h3>
+        <p className='text-[9px] text-slate-400 font-bold mb-3'>Restaura los valores iniciales y equipos originales de la competición.</p>
+        <button onClick={() => setShowResetConfirm(true)} className='w-full py-3.5 bg-gradient-to-r from-red-700/60 via-red-600/50 to-red-700/60 text-red-200 font-black uppercase tracking-widest text-[10px] rounded-2xl border-2 border-red-500/40 active:scale-95 transition-all shadow-[0_0_25px_rgba(239,68,68,0.2)] hover:shadow-[0_0_35px_rgba(239,68,68,0.35)] hover:border-red-400/60 flex items-center justify-center gap-2 italic'>
+           <RotateCcw size={14} className='text-red-300'/> Reiniciar Competición
+        </button>
       </div>
 
       <AnimatePresence>
@@ -2570,98 +3071,115 @@ const ConfigPanel = ({ initialComp, compId, onSave, onCancel, onTotalReset }) =>
         )}
       </AnimatePresence>
 
-      {draft.type === 'league' && (
-        <div className='flex mb-4 bg-slate-900/50 p-1 rounded-2xl border border-white/10 backdrop-blur-sm'>
-          <button onClick={() => setEditDiv(1)} className={`flex-1 py-2 text-[10px] font-black uppercase italic rounded-xl transition-all ${editDiv === 1 ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`}>1ª División</button>
-          <button onClick={() => setEditDiv(2)} className={`flex-1 py-2 text-[10px] font-black uppercase italic rounded-xl transition-all ${editDiv === 2 ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`}>2ª División</button>
-        </div>
-      )}
-
-      {draft.type !== 'league' && (
-        <div className='space-y-2 mb-6'>
-          {isWC && (
-            <button
-              onClick={() => {
-                const fresh = buildDynamicWCPool({ randomize: true });
-                setDraft(prev => ({
-                  ...prev,
-                  teams: fresh.map((t, i) => ({ ...t, id: i + 1, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }))
-                }));
-                setAnnexToast('¡32 selecciones clasificadas generadas con variedad continental!');
-                setTimeout(() => setAnnexToast(null), 3000);
-              }}
-              disabled={hasStarted}
-              className={`w-full p-3 border rounded-2xl text-[9px] font-black uppercase italic flex items-center justify-center gap-2 transition-all backdrop-blur-md ${
-                hasStarted
-                  ? 'opacity-40 cursor-not-allowed bg-indigo-950/20 border-indigo-500/10 text-indigo-400/50'
-                  : 'bg-gradient-to-r from-indigo-600/30 via-blue-600/30 to-indigo-600/30 text-indigo-200 border-indigo-400/40 hover:border-indigo-400 hover:bg-indigo-600/40 active:scale-95 shadow-md'
-              }`}
-            >
-              <Globe size={16} className='text-indigo-400' /> Generar Nuevas 32 Clasificadas Variadas (60+ Países)
-            </button>
-          )}
-          <div className='grid grid-cols-2 gap-2'>
-            <button onClick={() => handleDrawUI('auto')} disabled={hasStarted} className={`p-3 border rounded-2xl text-[8px] font-black uppercase italic flex flex-col items-center justify-center gap-1 transition-all backdrop-blur-md ${hasStarted ? 'opacity-40 cursor-not-allowed bg-yellow-900/20 border-yellow-500/10 text-yellow-500/50' : 'bg-yellow-600/20 text-yellow-200 border-yellow-500/40 hover:bg-yellow-600/40 active:scale-95'}`}>
-              <Wand2 size={16}/> Auto-Rellenar
-            </button>
-            <button onClick={() => handleDrawUI('shuffle')} disabled={hasStarted} className={`p-3 border rounded-2xl text-[8px] font-black uppercase italic flex flex-col items-center justify-center gap-1 transition-all backdrop-blur-md ${hasStarted ? 'opacity-40 cursor-not-allowed bg-emerald-900/20 border-emerald-500/10 text-emerald-500/50' : 'bg-emerald-600/20 text-emerald-200 border-emerald-500/40 hover:bg-emerald-600/40 active:scale-95'}`}>
-              <Shuffle size={16}/> Sorteo Dinámico
-            </button>
-          </div>
-          {hasStarted && <p className='text-[8px] text-center text-red-400 font-bold uppercase italic mt-1 drop-shadow-md'>No puedes re-sortear torneos en curso.</p>}
-        </div>
-      )}
-
-      <div className='flex items-center justify-between mb-3 px-1'>
-        <h3 className='text-xs font-black uppercase italic text-slate-300'>
-          {isWC ? `Selecciones en el Torneo (${(currentTeams || []).length})` : `Equipos Configurados (${(currentTeams || []).length})`}
-        </h3>
-        {isWC && <span className='text-[9px] text-slate-400 font-bold'>Se sortearán 32 selecciones a los grupos A-H</span>}
-      </div>
-
-      <div className='grid gap-4'>
-        {(!Array.isArray(currentTeams) || currentTeams.length === 0) && <div className='text-center py-10 bg-slate-900/30 backdrop-blur-md rounded-[2rem] border border-dashed border-white/20'><p className='text-[10px] font-bold text-slate-300 uppercase italic'>No hay equipos configurados.</p></div>}
-        {Array.isArray(currentTeams) && currentTeams.map(t => (
-          <div key={t.id} className='bg-slate-900/30 backdrop-blur-md p-5 rounded-[2rem] border border-white/10 shadow-lg space-y-4 relative group'>
-            <div className='flex items-center gap-4'>
-              <Shield color1={t?.color1} color2={t?.color2} initial={t?.name} size='lg' isFlag={t?.isFlag} />
-              <div className='flex-grow'>
-                <div className='flex items-center gap-2'>
-                  <input className='bg-black/30 w-full rounded-xl p-2 text-sm font-black italic uppercase border border-white/10 focus:border-blue-500 focus:bg-slate-800/80 outline-none text-white transition-colors backdrop-blur-sm' value={t?.name} onChange={(e) => updateTeamAttr(t.id, 'name', e.target.value)} />
-                  {isWC && !hasStarted && (
-                    <button
-                      onClick={() => handleRemoveTeam(t.id)}
-                      title='Eliminar selección'
-                      className='p-2 bg-red-950/40 border border-red-500/30 text-red-400 hover:bg-red-900/60 rounded-xl transition-all active:scale-95 shrink-0'
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  )}
+      {/* MODAL DE ADVERTENCIA DE VALIDACIÓN DE CUPO (MUNDIAL 32 SELECCIONES) */}
+      <AnimatePresence>
+        {validationWarningModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className='fixed inset-0 z-[110] bg-black/90 backdrop-blur-md flex items-center justify-center p-3.5 sm:p-4'>
+            <motion.div initial={{ scale: 0.85, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.85, y: 20 }} className='bg-slate-900 border-2 border-amber-500/50 rounded-3xl p-5 max-w-md w-full shadow-2xl space-y-4 max-h-[85vh] flex flex-col'>
+              <div className='flex items-start gap-3 border-b border-white/10 pb-3'>
+                <div className='w-10 h-10 rounded-2xl bg-amber-500/20 flex items-center justify-center border border-amber-500/40 text-amber-400 shrink-0'>
+                  <AlertTriangle size={22} />
                 </div>
-                {isWC && t.region && (
-                  <div className='mt-1.5 flex items-center gap-1.5'>
-                    <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-md bg-indigo-950/60 text-indigo-300 border border-indigo-500/20'>
-                      Región: {regionLabels[t.region] || t.region}
-                    </span>
-                  </div>
-                )}
-                <div className='grid grid-cols-3 gap-2 mt-3'>
-                  <AttrStepper label="Atk (1-5)" val={t.att} min={1} max={5} onUpdate={(v) => updateTeamAttr(t.id, 'att', v)} />
-                  <AttrStepper label="Opp (1-5)" val={t.opp} min={1} max={5} onUpdate={(v) => updateTeamAttr(t.id, 'opp', v)} />
-                  <AttrStepper label="Def (1-4)" val={t.def} min={1} max={4} onUpdate={(v) => updateTeamAttr(t.id, 'def', v)} />
+                <div className='min-w-0 flex-1'>
+                  <h3 className='text-sm sm:text-base font-black uppercase italic text-amber-300'>
+                    {validationWarningModal.type === 'excess' ? 'Cupo de 32 Selecciones Excedido' : 'Cupo Incompleto'}
+                  </h3>
+                  <p className='text-[10px] text-slate-300 font-bold leading-tight mt-0.5'>
+                    {validationWarningModal.type === 'excess'
+                      ? `Tienes ${validationWarningModal.count} selecciones ingresadas (${validationWarningModal.diff} de más). Debes eliminar ${validationWarningModal.diff} selección(es) para dejar el cupo oficial en exactamente 32.`
+                      : `Tienes ${validationWarningModal.count} selecciones (faltan ${validationWarningModal.diff}). Se necesitan exactamente 32 selecciones para conformar los 8 grupos.`}
+                  </p>
                 </div>
-                <div className='flex gap-2 mt-3 bg-black/30 p-1.5 rounded-xl border border-white/5 w-max backdrop-blur-sm'>
-                  <input type='color' value={t.color1} onChange={(e) => updateTeamAttr(t.id, 'color1', e.target.value)} className='w-8 h-8 rounded-lg bg-transparent cursor-pointer border-none p-0' />
-                  <input type='color' value={t.color2} onChange={(e) => updateTeamAttr(t.id, 'color2', e.target.value)} className='w-8 h-8 rounded-lg bg-transparent cursor-pointer border-none p-0' />
-                </div>
+                <button onClick={() => setValidationWarningModal(null)} className='p-1 text-slate-400 hover:text-white rounded-lg'>
+                  <X size={18} />
+                </button>
               </div>
-            </div>
-          </div>
-        ))}
-      </div>
 
-      <div className='fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-xs px-6 z-50'>
-        <button onClick={() => onSave(draft)} className='w-full bg-blue-600/90 backdrop-blur-md text-white py-4 rounded-2xl font-black uppercase italic tracking-widest shadow-[0_10px_20px_rgba(0,0,0,0.5)] flex items-center justify-center gap-2 active:scale-95 transition-all border border-blue-400'><Save size={18} /> Guardar Cambios</button>
+              {validationWarningModal.type === 'excess' ? (
+                <div className='flex-grow overflow-y-auto space-y-2 pr-1 custom-scrollbar max-h-[45vh]'>
+                  <p className='text-[9px] font-black uppercase text-slate-400 tracking-wider'>
+                    Selecciona cuál(es) deseas eliminar para quedar en 32:
+                  </p>
+                  {(draft.teams || []).map((t: any) => (
+                    <div key={t.id} className='flex items-center justify-between p-2 rounded-xl bg-black/40 border border-white/5'>
+                      <div className='flex items-center gap-2 min-w-0'>
+                        <Shield color1={t.color1} color2={t.color2} initial={t.name} size='xs' isFlag={t.isFlag} />
+                        <span className='text-xs font-bold text-white uppercase italic truncate'>{t.name}</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const newTeams = (draft.teams || []).filter((x: any) => x.id !== t.id);
+                          setDraft((prev: any) => ({ ...prev, teams: newTeams }));
+                          if (newTeams.length === 32) {
+                            setValidationWarningModal(null);
+                            setAnnexToast('¡Cupo exacto de 32 selecciones alcanzado! Ya puedes guardar.');
+                            setTimeout(() => setAnnexToast(null), 3000);
+                          } else if (newTeams.length > 32) {
+                            setValidationWarningModal({
+                              type: 'excess',
+                              count: newTeams.length,
+                              diff: newTeams.length - 32
+                            });
+                          } else {
+                            setValidationWarningModal(null);
+                          }
+                        }}
+                        className='px-2.5 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 active:scale-95 transition-all'
+                      >
+                        <Trash2 size={12} /> Eliminar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className='space-y-3 py-2'>
+                  <p className='text-xs text-slate-300 font-bold'>
+                    Puedes autocompletar y equilibrar las 32 selecciones oficiales con 1 toque o regresar y anexar los países que gustes.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setValidationWarningModal(null);
+                      handleGenerateAndDrawWC();
+                    }}
+                    className='w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl text-xs font-black uppercase italic tracking-wider flex items-center justify-center gap-2 active:scale-95 shadow-lg shadow-emerald-500/25 border border-emerald-400/40'
+                  >
+                    <Sparkles size={14} /> Generar 32 Selecciones Oficiales
+                  </button>
+                </div>
+              )}
+
+              <div className='flex gap-2 pt-2 border-t border-white/10'>
+                <button
+                  onClick={() => setValidationWarningModal(null)}
+                  className='flex-1 py-2.5 bg-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-black uppercase active:scale-95 transition-all border border-white/10'
+                >
+                  Cerrar y Revisar
+                </button>
+                {(draft.teams || []).length === 32 && (
+                  <button
+                    onClick={() => {
+                      setValidationWarningModal(null);
+                      onSave(draft);
+                    }}
+                    className='flex-1 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-xs font-black uppercase italic active:scale-95 transition-all shadow-lg shadow-blue-500/25'
+                  >
+                    Guardar Cambios
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* BOTÓN FLOTANTE INFERIOR CON AJUSTE SAFE-AREA Y RESPONSIVO */}
+      <div className='fixed bottom-3 sm:bottom-4 left-0 right-0 max-w-sm mx-auto px-4 z-50 pointer-events-none'>
+        <button
+          onClick={handleSaveAttempt}
+          className='w-full pointer-events-auto bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-600 hover:from-blue-500 hover:to-indigo-500 text-white py-3.5 px-4 rounded-2xl font-black uppercase italic tracking-widest text-xs shadow-[0_8px_25px_rgba(0,0,0,0.6)] flex items-center justify-center gap-2 active:scale-95 transition-all border border-blue-400/50 backdrop-blur-md'
+        >
+          <Save size={16} className='text-blue-200' /> Guardar Cambios
+        </button>
       </div>
     </div>
   );
@@ -3039,15 +3557,37 @@ function DiceFootballApp() {
       registerTitles(seasonTitles);
     }
     setSeasonState(s => ({ season: (s.season || 1) + 1, globalMatchday: 1, phase: 'leagues' }));
-    setCareer(c => (c.active ? {
-      ...c,
-      completedOfficeWeeks: [],
-      trainedMatchday: -1,
-      medicalImmunityWeeks: 0,
-      activeInjury: null,
-      lastSimulationFeedback: null,
-      seasonLog: []
-    } : c));
+    setCareer(c => {
+      if (!c.active) return c;
+      // Sincronizar automáticamente la división del club del usuario si ascendió o descendió
+      let updatedDiv = c.div;
+      let wonPromotion = false;
+      const leagueComp = comps[c.compId];
+      if (leagueComp && leagueComp.type === 'league') {
+        const sorted1 = [...(leagueComp.teams || [])].sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga));
+        const sorted2 = [...(leagueComp.teams2 || [])].sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga));
+        if (c.div === 2 && sorted2.slice(0, 3).some(t => t.id === c.teamId || t.name === (careerTeam?.name || ''))) {
+          updatedDiv = 1;
+          wonPromotion = true;
+        } else if (c.div === 1 && sorted1.slice(-3).some(t => t.id === c.teamId || t.name === (careerTeam?.name || ''))) {
+          updatedDiv = 2;
+        }
+      }
+      return {
+        ...c,
+        div: updatedDiv,
+        trophies: {
+          ...c.trophies,
+          promotions: (c.trophies?.promotions || 0) + (wonPromotion ? 1 : 0)
+        },
+        completedOfficeWeeks: [],
+        trainedMatchday: -1,
+        medicalImmunityWeeks: 0,
+        activeInjury: null,
+        lastSimulationFeedback: null,
+        seasonLog: []
+      };
+    });
     setActiveCompId(null);
     setCompView('main');
     setView('hub');
@@ -5122,13 +5662,28 @@ function DiceFootballApp() {
               sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null
             }));
           } else if (phase === 'Semis') {
-            nextPhase = 'Final';
+            const losers = matchesToProcess.map((m: any, i: number) => {
+              return m.hId === winners[i] ? m.aId : m.hId;
+            });
             newBracket.Final = [{
               id: 'F1',
               hId: winners[0] ?? comp.teams?.[0]?.id ?? 0,
               aId: winners[1] ?? comp.teams?.[1]?.id ?? 1,
               sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null
             }];
+            if (isWorldCup) {
+              newBracket.TercerPuesto = [{
+                id: 'TP1',
+                hId: losers[0] ?? comp.teams?.[2]?.id ?? 0,
+                aId: losers[1] ?? comp.teams?.[3]?.id ?? 1,
+                sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null
+              }];
+              nextPhase = 'TercerPuesto';
+            } else {
+              nextPhase = 'Final';
+            }
+          } else if (phase === 'TercerPuesto') {
+            nextPhase = 'Final';
           } else {
             nextPhase = 'Terminado';
             showWinner = true;
@@ -5137,6 +5692,8 @@ function DiceFootballApp() {
 
         const dayLabel = phase === 'Final'
           ? 'Gran Final'
+          : phase === 'TercerPuesto'
+          ? 'Tercer Puesto'
           : (phase + (isChampions ? (isVuelta ? ' (Vuelta)' : ' (Ida)') : ''));
 
         comp = {
@@ -5772,13 +6329,29 @@ function DiceFootballApp() {
               sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null
             }));
           } else if (phase === 'Semis') {
-            nextPhase = 'Final';
+            const isWC = cId === 'C2' || currentComp.id === 'C2' || !!currentComp.isWorldCup || currentComp.name?.includes('Mundial') || currentComp.name?.includes('World');
+            const losers = matchesToProcess.map((m, i) => {
+              return m.hId === winners[i] ? m.aId : m.hId;
+            });
             newBracket.Final = [{
               id: 'F1',
               hId: winners[0] ?? currentComp.teams?.[0]?.id ?? 0,
               aId: winners[1] ?? currentComp.teams?.[1]?.id ?? 1,
               sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null
             }];
+            if (isWC) {
+              newBracket.TercerPuesto = [{
+                id: 'TP1',
+                hId: losers[0] ?? currentComp.teams?.[2]?.id ?? 0,
+                aId: losers[1] ?? currentComp.teams?.[3]?.id ?? 1,
+                sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null
+              }];
+              nextPhase = 'TercerPuesto';
+            } else {
+              nextPhase = 'Final';
+            }
+          } else if (phase === 'TercerPuesto') {
+            nextPhase = 'Final';
           } else {
             nextPhase = 'Terminado';
             showWinner = true;
@@ -5786,6 +6359,8 @@ function DiceFootballApp() {
        }
         const dayLabel = phase === 'Final'
           ? 'Gran Final'
+          : phase === 'TercerPuesto'
+          ? 'Tercer Puesto'
           : (phase + (isChampions ? (isVuelta ? ' (Vuelta)' : ' (Ida)') : ''));
         const updatedComp = { history: [{ day: dayLabel, results: allResults }, ...currentComp.history], matchday: currentComp.matchday + 1, phase: nextPhase, bracket: newBracket, showWinner };
         updateCompById(cId, updatedComp);
@@ -5970,18 +6545,57 @@ function DiceFootballApp() {
   };
 
   const handleTotalReset = (compId) => {
-    const defaultData = getDefaultComps()[compId];
-    const prevHistory = comps[compId]?.championsHistory || [];
-    const prevHistory2 = comps[compId]?.championsHistory2 || [];
-    updateActiveComp({
-      teams: defaultData.teams,
-      teams2: defaultData.teams2,
-      matchday: 0, matchday2: 0, history: [], history2: [],
-      showWinner: false, showWinner2: false, phase: defaultData.phase, bracket: null,
-      championsHistory: prevHistory,
-      championsHistory2: prevHistory2
-    });
+    const targetCompId = compId || activeCompId;
+    const defaultData = (getDefaultComps && getDefaultComps()[targetCompId]) || {};
+    const prevHistory = comps[targetCompId]?.championsHistory || [];
+    const prevHistory2 = comps[targetCompId]?.championsHistory2 || [];
+
+    if (targetCompId === 'C2') {
+      const fresh = buildDynamicWCPool({ randomize: true, customTeams: [] });
+      const pool = fresh.slice(0, 32).map((t, i) => ({ ...t, id: i + 1, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }));
+      pool.sort((a, b) => (b.att + b.opp + b.def) - (a.att + a.opp + a.def));
+      const drawData = drawKnockoutGroups(pool, true, true);
+      updateCompById('C2', {
+        teams: drawData.teams,
+        groups: drawData.groups,
+        phase: 'groups',
+        matchday: 0,
+        history: [],
+        bracket: null,
+        showWinner: false,
+        userTeamId: drawData.teams?.[0]?.id || 1,
+        championsHistory: prevHistory
+      });
+    } else if (targetCompId === 'C1') {
+      const clData = getAutoFillData('C1', comps);
+      updateCompById('C1', {
+        ...clData,
+        matchday: 0,
+        history: [],
+        phase: 'groups',
+        bracket: null,
+        showWinner: false,
+        userTeamId: clData.teams?.[0]?.id || 1,
+        championsHistory: prevHistory
+      });
+    } else {
+      updateCompById(targetCompId, {
+        teams: defaultData.teams || [],
+        teams2: defaultData.teams2 || [],
+        matchday: 0,
+        matchday2: 0,
+        history: [],
+        history2: [],
+        showWinner: false,
+        showWinner2: false,
+        phase: defaultData.phase || 'groups',
+        bracket: null,
+        championsHistory: prevHistory,
+        championsHistory2: prevHistory2
+      });
+    }
     setCompView('main');
+    setMatchState(null);
   };
 
   const CompetitionView = () => {
@@ -6044,6 +6658,14 @@ function DiceFootballApp() {
       }
       return currentTeams[0];
     }, [activeComp, currentTeams, isLeague, sortedTeams]);
+
+    const finalMatch = !isLeague ? (activeComp.bracket?.Final?.[0] || activeComp.bracket?.Final) : null;
+    const cupTournamentEnded = !isLeague && Boolean(
+      finalMatch &&
+      finalMatch.sh !== null && finalMatch.sa !== null && finalMatch.sh !== undefined && finalMatch.sa !== undefined &&
+      (finalMatch.sh !== finalMatch.sa || (finalMatch.penH !== null && finalMatch.penH !== undefined))
+    );
+    const cupChampionTeam = cupTournamentEnded ? winner : null;
 
     useEffect(() => {
       if (!isLeague && activeComp.phase !== 'groups' && !activeComp.bracket) {
@@ -6337,6 +6959,10 @@ function DiceFootballApp() {
             const displayAllTeams = championModalDiv === 2 ? (activeComp.teams2 || []) : (activeComp.teams || []);
             const relegated = sorted1.slice(-3);
             const promoted = sorted2.slice(0, 3);
+            // Ganador contextual según la división seleccionada en el modal o el bracket
+            const modalWinner = isLeague 
+              ? (championModalDiv === 2 ? champion2 : champion1)
+              : winner;
             // Vista previa con la mecánica original de herencia de stats
             const newPromotedStats = relegated.map(t => ({ att: t.att, opp: t.opp, def: t.def }));
             const newRelegatedStats = [
@@ -6347,8 +6973,6 @@ function DiceFootballApp() {
 
             return (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className='fixed inset-0 z-[60] bg-slate-950/98 backdrop-blur-xl flex flex-col'>
-              {/* Confetti removed */}
-
               {/* Header */}
                <div className='shrink-0 pt-3 pb-2 px-4'>
                 <div className='flex items-center justify-center gap-3'>
@@ -6364,17 +6988,17 @@ function DiceFootballApp() {
               <div className='shrink-0 px-4 pb-3'>
                 <div className='bg-gradient-to-br from-yellow-500/15 to-amber-600/10 border border-yellow-500/30 rounded-2xl p-3 shadow-[0_0_30px_rgba(234,179,8,0.1)]'>
                   <div className='flex items-center gap-3'>
-                    <Shield color1={winner?.color1} color2={winner?.color2} initial={winner?.name} size='md' isFlag={winner?.isFlag} />
+                    <Shield color1={modalWinner?.color1} color2={modalWinner?.color2} initial={modalWinner?.name} size='md' isFlag={modalWinner?.isFlag} />
                     <div className='flex-1 min-w-0'>
-                      <h2 className='text-base font-black uppercase italic text-white drop-shadow-md truncate'>{winner?.name}</h2>
+                      <h2 className='text-base font-black uppercase italic text-white drop-shadow-md truncate'>{modalWinner?.name}</h2>
                       <p className='text-[8px] font-bold text-yellow-400/80 uppercase tracking-widest'>
-                        {isDiv2 ? '2ª División' : (isLeague ? '1ª División' : activeComp.name)}
+                        {isLeague ? (championModalDiv === 2 ? 'Campeón 2ª División' : 'Campeón 1ª División') : activeComp.name}
                       </p>
-                      {winner && (
+                      {modalWinner && (
                         <div className='flex gap-1.5 mt-1.5 flex-wrap'>
-                          <span className='text-[9px] font-black bg-yellow-500/25 text-yellow-300 px-2 py-0.5 rounded-full border border-yellow-500/40'>{winner.pts} PTS</span>
-                          <span className='text-[9px] font-bold bg-slate-800/70 text-slate-200 px-2 py-0.5 rounded-full border border-white/10'>{winner.w}G {winner.d}E {winner.l}P</span>
-                          <span className='text-[9px] font-bold bg-slate-800/70 text-slate-200 px-2 py-0.5 rounded-full border border-white/10'>GF:{winner.gf} GC:{winner.ga}</span>
+                          <span className='text-[9px] font-black bg-yellow-500/25 text-yellow-300 px-2 py-0.5 rounded-full border border-yellow-500/40'>{modalWinner.pts} PTS</span>
+                          <span className='text-[9px] font-bold bg-slate-800/70 text-slate-200 px-2 py-0.5 rounded-full border border-white/10'>{modalWinner.w}G {modalWinner.d}E {modalWinner.l}P</span>
+                          <span className='text-[9px] font-bold bg-slate-800/70 text-slate-200 px-2 py-0.5 rounded-full border border-white/10'>GF:{modalWinner.gf} GC:{modalWinner.ga}</span>
                         </div>
                       )}
                     </div>
@@ -6765,8 +7389,16 @@ function DiceFootballApp() {
 
               {/* Footer buttons */}
               <div className='shrink-0 p-4 border-t border-white/10 bg-slate-950/80 space-y-2'>
+                <div className='flex items-center justify-between gap-2 mb-1'>
+                  <button
+                    onClick={() => setShowChampionsHistory(true)}
+                    className='w-full py-2 bg-amber-500/15 border border-amber-400/30 rounded-xl text-[9px] font-black uppercase tracking-wider text-amber-300 active:scale-95 transition-all flex items-center justify-center gap-1.5'
+                  >
+                    <Trophy size={13} className='text-amber-400' /> Ver Historial / Palmarés
+                  </button>
+                </div>
                 {isLeague && readyForPromotion && championModalTab !== 'promotions' ? (
-                  <button onClick={() => setChampionModalTab('promotions')} className='w-full bg-gradient-to-r from-emerald-600 to-blue-600 text-white py-4 rounded-2xl text-[11px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2'>
+                  <button onClick={() => setChampionModalTab('promotions')} className='w-full bg-gradient-to-r from-emerald-600 to-blue-600 text-white py-3.5 rounded-2xl text-[11px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2'>
                     <ArrowUpCircle size={16}/> Ver Ascensos y Descensos
                   </button>
                 ) : isLeague && readyForPromotion && championModalTab === 'promotions' ? (
@@ -6775,7 +7407,7 @@ function DiceFootballApp() {
                     setChampionModalTab('stats');
                     setChampionModalDiv(1);
                     startNewGlobalSeason();
-                  }} className='w-full bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 py-4 rounded-2xl text-[11px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2'>
+                  }} className='w-full bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 py-3.5 rounded-2xl text-[11px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2'>
                     <RotateCcw size={16}/> Nueva Temporada Global
                   </button>
                   ) : (
@@ -6816,7 +7448,7 @@ function DiceFootballApp() {
                          updateActiveComp({ showWinner: false });
                        }
                     }} className='flex-[2] bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2'>
-                      <RotateCcw size={14}/> {activeCompId === 'C1' && seasonReadyForNewSeason ? 'Nueva Temporada Global' : 'Nueva Temporada'}
+                      <RotateCcw size={14}/> {activeCompId === 'C1' && seasonReadyForNewSeason ? 'Nueva Temporada Global' : activeCompId === 'C2' ? 'Nueva Edición Mundial' : 'Nueva Edición'}
                     </button>
                   </div>
                 ) : (
@@ -6824,7 +7456,7 @@ function DiceFootballApp() {
                      setChampionModalTab('stats');
                      setChampionModalDiv(1);
                      if (isDiv2) updateActiveComp({ showWinner2: false }); else updateActiveComp({ showWinner: false });
-                  }} className='w-full bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 py-4 rounded-2xl text-[11px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all'>Continuar</button>
+                  }} className='w-full bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 py-3.5 rounded-2xl text-[11px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all'>Continuar</button>
                 )}
               </div>
             </motion.div>
@@ -6832,22 +7464,34 @@ function DiceFootballApp() {
           })()}
         </AnimatePresence>
 
-        <header className='flex items-center justify-between mb-4'>
-          <div className='flex items-center gap-3'>
-            <button onClick={() => setView('hub')} className='p-2 bg-slate-900/30 backdrop-blur-md rounded-xl text-slate-200 border border-white/10 active:scale-95 transition-all'><ChevronLeft /></button>
-            <div>
-              <h2 className='text-xl font-black italic uppercase truncate drop-shadow-md'>{activeComp?.name}</h2>
-              {activeComp.type !== 'league' && <span className='text-[8px] font-black text-blue-300 uppercase tracking-widest drop-shadow-md'>Fase: {activeComp.phase}</span>}
+        {/* HEADER RESPONSIVO OPTIMIZADO PARA MÓVIL */}
+        <header className='flex items-center justify-between gap-2 mb-4 bg-slate-900/50 backdrop-blur-md p-2.5 sm:p-3 rounded-2xl border border-white/10'>
+          <div className='flex items-center gap-2 min-w-0'>
+            <button onClick={() => setView('hub')} className='p-2 bg-slate-900/80 hover:bg-slate-800 rounded-xl text-slate-200 border border-white/10 active:scale-95 transition-all shrink-0'><ChevronLeft size={18} /></button>
+            <div className='min-w-0'>
+              <h2 className='text-sm sm:text-base font-black italic uppercase truncate drop-shadow-md text-white'>{activeComp?.name}</h2>
+              {activeComp.type !== 'league' && (
+                <span className='text-[8px] font-black text-blue-300 uppercase tracking-widest block truncate'>
+                  {cupTournamentEnded ? '🏆 Torneo Finalizado' : `Fase: ${activeComp.phase}`}
+                </span>
+              )}
             </div>
           </div>
-          <div className='flex items-center gap-2'>
+          <div className='flex items-center gap-1.5 shrink-0'>
             <button
               onClick={() => setShowChampionsHistory(true)}
-              className='flex items-center gap-1.5 px-3 py-2 bg-amber-500/20 text-amber-300 rounded-xl border border-amber-400/40 text-[9px] font-black uppercase tracking-wider active:scale-95 transition-all shadow-md'
+              className='flex items-center gap-1 px-2.5 py-2 bg-amber-500/20 text-amber-300 rounded-xl border border-amber-400/40 text-[9px] font-black uppercase tracking-wider active:scale-95 transition-all shadow-md shrink-0'
+              title='Palmarés e Historial'
             >
-              <Trophy size={13} className='text-amber-400' /> Palmarés
+              <Trophy size={13} className='text-amber-400 shrink-0' /> <span className='hidden xs:inline sm:inline'>Palmarés</span>
             </button>
-            <button onClick={manualSave} className='p-2 bg-blue-600/30 text-blue-300 rounded-xl border border-blue-500/40 active:scale-95'><Save size={18}/></button>
+            <button
+              onClick={manualSave}
+              className='p-2 bg-blue-600/30 text-blue-300 hover:bg-blue-600/50 rounded-xl border border-blue-500/40 active:scale-95 shrink-0'
+              title='Guardar Estado'
+            >
+              <Save size={16}/>
+            </button>
           </div>
         </header>
 
@@ -6943,7 +7587,61 @@ function DiceFootballApp() {
           </section>
         )}
 
-        {!currentShowWinner && (currentMatch || (isLeague && currentMatchday >= generateLeagueSchedule(currentTeams).length)) && (
+        {/* TARJETA DE TORNEO CONCLUIDO / RESUMEN DE CAMPEÓN */}
+        {!isLeague && cupTournamentEnded && !currentShowWinner && (
+          <section className='bg-gradient-to-br from-amber-950/70 via-slate-900/90 to-yellow-950/70 backdrop-blur-md rounded-[2.5rem] p-6 shadow-2xl relative overflow-hidden border-2 border-yellow-500/30 mb-6 space-y-4 text-center'>
+            <div className='inline-flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-500/20 border border-yellow-500/40 text-yellow-300 text-[9px] font-black uppercase tracking-wider'>
+              <Trophy size={13} className='text-yellow-400' /> Torneo Concluido
+            </div>
+
+            {cupChampionTeam && (
+              <div className='flex flex-col items-center justify-center space-y-2'>
+                <Shield color1={cupChampionTeam.color1} color2={cupChampionTeam.color2} initial={cupChampionTeam.name} size='xl' isFlag={cupChampionTeam.isFlag} />
+                <div>
+                  <h3 className='text-lg sm:text-xl font-black uppercase italic text-white drop-shadow-md'>{cupChampionTeam.name}</h3>
+                  <p className='text-xs font-black uppercase tracking-widest text-amber-400'>¡Campeón de la {activeComp.name}!</p>
+                </div>
+              </div>
+            )}
+
+            <div className='grid grid-cols-2 gap-2 pt-2'>
+              <button
+                onClick={() => updateActiveComp({ showWinner: true })}
+                className='py-3 px-2 rounded-2xl bg-slate-800/80 hover:bg-slate-700/80 border border-white/10 text-slate-200 text-[10px] font-black uppercase italic tracking-wider active:scale-95 transition-all flex items-center justify-center gap-1.5'
+              >
+                <Sparkles size={14} className='text-yellow-400' /> Ver Resumen
+              </button>
+              <button
+                onClick={() => setCompView('bracket')}
+                className='py-3 px-2 rounded-2xl bg-slate-800/80 hover:bg-slate-700/80 border border-white/10 text-slate-200 text-[10px] font-black uppercase italic tracking-wider active:scale-95 transition-all flex items-center justify-center gap-1.5'
+              >
+                <Swords size={14} className='text-purple-400' /> Ver Llaves
+              </button>
+            </div>
+
+            <button
+              onClick={() => setShowChampionsHistory(true)}
+              className='w-full py-3 px-3 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 text-[10px] font-black uppercase italic tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg'
+            >
+              <Trophy size={15} className='text-amber-400' /> Ver Historial y Palmarés Oficial
+            </button>
+
+            <button
+              onClick={() => {
+                if (activeCompId === 'C1' && seasonReadyForNewSeason) {
+                  startNewGlobalSeason();
+                } else {
+                  handleTotalReset(activeCompId);
+                }
+              }}
+              className='w-full py-4 rounded-2xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-500 text-slate-950 font-black uppercase italic tracking-widest text-xs shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 border-2 border-yellow-300/60'
+            >
+              <RotateCcw size={16} /> {activeCompId === 'C1' && seasonReadyForNewSeason ? 'Iniciar Nueva Temporada Global' : activeCompId === 'C2' ? 'Iniciar Nueva Copa del Mundo' : 'Iniciar Nueva Edición'}
+            </button>
+          </section>
+        )}
+
+        {!currentShowWinner && !cupTournamentEnded && (currentMatch || (isLeague && currentMatchday >= generateLeagueSchedule(currentTeams).length)) && (
           <section className='bg-gradient-to-br from-blue-700/80 to-indigo-900/80 backdrop-blur-md rounded-[2.5rem] p-6 shadow-2xl relative overflow-hidden border border-white/20'>
             <div className='flex justify-between items-start mb-6'>
               <div className='flex flex-col items-center w-24'>
@@ -6986,7 +7684,7 @@ function DiceFootballApp() {
               return (
                 <div className='space-y-2'>
                 <button onClick={() => startMatch(homeId, awayId, isDiv2)} className='w-full bg-white/95 text-blue-900 py-4 rounded-2xl text-xs font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex flex-col items-center justify-center'>
-                  <span>{activeComp.phase === 'Final' ? 'Gran Final' : ('Jugar ' + (isLeague || activeComp.phase === 'groups' ? 'Jornada ' + (currentMatchday + 1) : activeComp.phase + (activeCompId === 'C1' ? (activeComp.matchday % 2 === 0 ? ' (Ida)' : ' (Vuelta)') : '')))}</span>
+                  <span>{activeComp.phase === 'Final' ? 'Gran Final' : activeComp.phase === 'TercerPuesto' ? 'Partido por 3º Puesto' : ('Jugar ' + (isLeague || activeComp.phase === 'groups' ? 'Jornada ' + (currentMatchday + 1) : activeComp.phase + (activeCompId === 'C1' ? (activeComp.matchday % 2 === 0 ? ' (Ida)' : ' (Vuelta)') : '')))}</span>
                   <span className='text-[7px] opacity-60 mt-0.5 tracking-normal'>{homeTeam?.opp} vs {awayTeam?.opp} TIROS DISPONIBLES</span>
 
                 </button>
@@ -7357,13 +8055,13 @@ function DiceFootballApp() {
           <div className='text-center py-20 text-slate-300 font-black bg-slate-900/30 backdrop-blur-md rounded-[2rem] border border-white/10 uppercase italic text-[10px] shadow-lg'>Las eliminatorias se generarán al finalizar la fase de grupos.</div>
         ) : (
           <div className='flex gap-4 overflow-x-auto custom-scrollbar pb-8'>
-            {['Octavos', 'Cuartos', 'Semis', 'Final'].filter(p => activeComp.bracket[p]).map(phase => {
+            {['Octavos', 'Cuartos', 'Semis', 'TercerPuesto', 'Final'].filter(p => activeComp.bracket[p]).map(phase => {
               const isChampions = activeCompId === 'C1';
-              const isTwoLegged = isChampions && phase !== 'Final';
+              const isTwoLegged = isChampions && phase !== 'Final' && phase !== 'TercerPuesto';
               return (
                 <div key={phase} className='min-w-[260px] sm:min-w-[290px] flex-shrink-0 space-y-2.5'>
                   <div className='flex items-center justify-between bg-slate-900/60 px-3 py-2 rounded-xl border border-white/10'>
-                    <h3 className='text-[10px] font-black uppercase text-blue-300'>{phase}</h3>
+                    <h3 className='text-[10px] font-black uppercase text-blue-300'>{phase === 'TercerPuesto' ? '3º Puesto' : phase}</h3>
                     {isTwoLegged ? (
                       <div className='flex items-center gap-2 text-[7px] font-black uppercase tracking-wider text-slate-400'>
                         <span className='w-5 text-center'>Ida</span>
@@ -7371,7 +8069,7 @@ function DiceFootballApp() {
                         <span className='w-6 text-center text-amber-300'>Glob</span>
                       </div>
                     ) : (
-                      <span className='text-[7.5px] font-bold text-amber-300 uppercase'>Final</span>
+                      <span className='text-[7.5px] font-bold text-amber-300 uppercase'>{phase === 'Final' ? 'Final' : phase === 'TercerPuesto' ? '3º Puesto' : '1 Partido'}</span>
                     )}
                   </div>
                   <div className='grid grid-cols-1 gap-2.5'>
@@ -7459,7 +8157,7 @@ function DiceFootballApp() {
                           {/* Indicador de Ganador / Clasificado */}
                           {winner ? (
                             <div className='mt-1 pt-1.5 border-t border-white/10 flex items-center justify-between text-[8px] font-black uppercase text-emerald-400'>
-                              <span>{phase === 'Final' ? '🏆 Campeón:' : 'Pasa:'}</span>
+                              <span>{phase === 'Final' ? '🏆 Campeón:' : phase === 'TercerPuesto' ? '🥉 3º Puesto:' : 'Pasa:'}</span>
                               <span className='text-amber-300 truncate max-w-[140px]'>{winner.name}</span>
                             </div>
                           ) : null}
@@ -7484,7 +8182,7 @@ function DiceFootballApp() {
           <div className='flex flex-col items-center gap-1'>
             <div className='px-4 py-1 bg-red-600/80 backdrop-blur-md rounded-full text-[9px] font-black uppercase italic animate-pulse shadow-md'>En Vivo</div>
             <span className='text-[8px] font-black uppercase italic text-slate-300 tracking-wider'>
-              {activeComp.phase === 'Final' ? '🏆 Gran Final' : isLeague || activeComp.phase === 'groups' ? `📅 Jornada ${currentMatchday + 1}` : `⚔️ ${activeComp.phase}${activeCompId === 'C1' ? (activeComp.matchday % 2 === 0 ? ' — Ida' : ' — Vuelta') : ''}`}
+              {activeComp.phase === 'Final' ? '🏆 Gran Final' : activeComp.phase === 'TercerPuesto' ? '🥉 3º Puesto' : isLeague || activeComp.phase === 'groups' ? `📅 Jornada ${currentMatchday + 1}` : `⚔️ ${activeComp.phase}${activeCompId === 'C1' ? (activeComp.matchday % 2 === 0 ? ' — Ida' : ' — Vuelta') : ''}`}
             </span>
           </div>
           <div className='w-10'></div>
@@ -7590,8 +8288,15 @@ function DiceFootballApp() {
 
   return (
     <div className='relative min-h-screen selection:bg-blue-500/30 font-sans text-slate-100 overflow-hidden'>
-      <div className='fixed inset-0 bg-[url("https://images.unsplash.com/photo-1522778119026-d647f0596c20?q=80&w=2000&auto=format&fit=crop")] bg-cover bg-center bg-no-repeat z-0'></div>
-      <div className='fixed inset-0 bg-slate-950/60 z-0 backdrop-blur-[2px]'></div>
+      {/* Champions League Night Stadium Background */}
+      <div 
+        className='fixed inset-0 bg-cover bg-center bg-no-repeat z-0 scale-105 transition-transform duration-1000'
+        style={{ backgroundImage: `url(${championsStadiumBg})` }}
+      />
+      {/* Deep Night Atmosphere & Stadium Lights Vignette */}
+      <div className='fixed inset-0 bg-gradient-to-b from-slate-950/80 via-slate-950/75 to-slate-950/95 z-0 backdrop-blur-[1.5px] pointer-events-none' />
+      <div className='fixed inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-500/25 via-indigo-900/10 to-transparent z-0 pointer-events-none' />
+      <div className='fixed inset-0 bg-[radial-gradient(circle_at_bottom,_var(--tw-gradient-stops))] from-emerald-500/10 via-transparent to-transparent z-0 pointer-events-none' />
 
       <div className='relative z-10 max-w-md mx-auto min-h-screen flex flex-col'>
         <AnimatePresence mode='wait'>
