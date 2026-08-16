@@ -10,11 +10,13 @@ import {
   Users, BarChart3, Play, RotateCcw, Check, Dice1, Dice2, Dice3, 
   Dice4, Dice5, Dice6, Globe, Shield as ShieldIcon, Info, ArrowRight, Dices,
   Wand2, Shuffle, ArrowUpCircle, ArrowDownCircle, AlertTriangle,
-  Newspaper, TrendingUp, AlertCircle, Flame, Star, X, Megaphone, Eye, Briefcase
+  Newspaper, TrendingUp, AlertCircle, Flame, Star, X, Megaphone, Eye, Briefcase,
+  Plus, Trash2, Flag, Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { registerTitle, registerTitles } from '@/lib/palmares';
-import { getCountryCode } from '@/lib/countries';
+import { getCountryCode, getCountryFlagUrl, inferCountryRegion } from '@/lib/countries';
+import { ALL_WORLD_CUP_TEAMS, buildDynamicWCPool } from '@/lib/worldCup';
 import TopWinnersTable from '@/components/TopWinnersTable';
 import { CareerSelectView, CareerView, CareerMatchView, CareerSeasonReviewModal } from '@/components/CareerMode';
 import { SimulationInjuryAlertModal } from '@/components/SimulationInjuryAlertModal';
@@ -182,40 +184,7 @@ const PRESETS = {
     { name: 'Shakhtar D.', att: 3, opp: 3, def: 3, color1: '#f68712', color2: '#000000', league: 'MI' },
     { name: 'Dynamo Kyiv', att: 2, opp: 2, def: 3, color1: '#ffffff', color2: '#0033a0', league: 'MI' }
   ],
-  WC: [
-    { name: 'Argentina', att: 4, opp: 5, def: 4, color1: '#75aadb', color2: '#ffffff', isFlag: true, region: 'SA' },
-    { name: 'France', att: 5, opp: 5, def: 3, color1: '#002395', color2: '#ffffff', isFlag: true, region: 'EU' },
-    { name: 'Brazil', att: 4, opp: 5, def: 3, color1: '#fedf00', color2: '#009b3a', isFlag: true, region: 'SA' },
-    { name: 'England', att: 4, opp: 5, def: 4, color1: '#ffffff', color2: '#ce1124', isFlag: true, region: 'EU' },
-    { name: 'Spain', att: 5, opp: 5, def: 4, color1: '#aa151b', color2: '#f1bf00', isFlag: true, region: 'EU' },
-    { name: 'Germany', att: 4, opp: 4, def: 3, color1: '#000000', color2: '#ffce00', isFlag: true, region: 'EU' },
-    { name: 'Portugal', att: 4, opp: 5, def: 3, color1: '#046a38', color2: '#da291c', isFlag: true, region: 'EU' },
-    { name: 'Netherlands', att: 4, opp: 4, def: 3, color1: '#f36c21', color2: '#ffffff', isFlag: true, region: 'EU' },
-    { name: 'Italy', att: 3, opp: 4, def: 4, color1: '#008c45', color2: '#ffffff', isFlag: true, region: 'EU' },
-    { name: 'Uruguay', att: 3, opp: 4, def: 4, color1: '#0081c8', color2: '#ffffff', isFlag: true, region: 'SA' },
-    { name: 'Croatia', att: 3, opp: 4, def: 3, color1: '#ff0000', color2: '#ffffff', isFlag: true, region: 'EU' },
-    { name: 'Morocco', att: 3, opp: 3, def: 4, color1: '#c1272d', color2: '#006233', isFlag: true, region: 'AF' },
-    { name: 'Japan', att: 3, opp: 4, def: 3, color1: '#ffffff', color2: '#bc002d', isFlag: true, region: 'AS' },
-    { name: 'USA', att: 3, opp: 3, def: 3, color1: '#b22234', color2: '#3c3b6e', isFlag: true, region: 'NA' },
-    { name: 'Mexico', att: 2, opp: 3, def: 3, color1: '#006847', color2: '#ce1126', isFlag: true, region: 'NA' },
-    { name: 'Colombia', att: 3, opp: 4, def: 3, color1: '#fcd116', color2: '#003893', isFlag: true, region: 'SA' },
-    { name: 'Belgium', att: 3, opp: 4, def: 3, color1: '#e30613', color2: '#000000', isFlag: true, region: 'EU' },
-    { name: 'Senegal', att: 3, opp: 3, def: 4, color1: '#00853f', color2: '#fdef42', isFlag: true, region: 'AF' },
-    { name: 'Switzerland', att: 2, opp: 3, def: 4, color1: '#d52b1e', color2: '#ffffff', isFlag: true, region: 'EU' },
-    { name: 'Denmark', att: 3, opp: 3, def: 3, color1: '#c60c30', color2: '#ffffff', isFlag: true, region: 'EU' },
-    { name: 'South Korea', att: 3, opp: 3, def: 3, color1: '#ffffff', color2: '#cd2e3a', isFlag: true, region: 'AS' },
-    { name: 'Chile', att: 2, opp: 2, def: 2, color1: '#0039a6', color2: '#d52b1e', isFlag: true, region: 'SA' },
-    { name: 'Ecuador', att: 2, opp: 3, def: 4, color1: '#ffdd00', color2: '#0033a0', isFlag: true, region: 'SA' },
-    { name: 'Nigeria', att: 3, opp: 3, def: 3, color1: '#008751', color2: '#ffffff', isFlag: true, region: 'AF' },
-    { name: 'Cameroon', att: 2, opp: 3, def: 3, color1: '#007a5e', color2: '#ce1126', isFlag: true, region: 'AF' },
-    { name: 'Ghana', att: 2, opp: 3, def: 2, color1: '#ffffff', color2: '#000000', isFlag: true, region: 'AF' },
-    { name: 'Canada', att: 2, opp: 3, def: 3, color1: '#ff0000', color2: '#ffffff', isFlag: true, region: 'NA' },
-    { name: 'Australia', att: 2, opp: 2, def: 3, color1: '#00008b', color2: '#ffcd00', isFlag: true, region: 'AS' },
-    { name: 'Serbia', att: 3, opp: 3, def: 2, color1: '#c6363c', color2: '#0c4076', isFlag: true, region: 'EU' },
-    { name: 'Poland', att: 2, opp: 3, def: 3, color1: '#ffffff', color2: '#dc143c', isFlag: true, region: 'EU' },
-    { name: 'Peru', att: 1, opp: 2, def: 3, color1: '#ffffff', color2: '#d91023', isFlag: true, region: 'SA' },
-    { name: 'Egypt', att: 2, opp: 3, def: 3, color1: '#ce1126', color2: '#000000', isFlag: true, region: 'AF' }
-  ]
+  WC: ALL_WORLD_CUP_TEAMS.slice(0, 32)
 };
 
 // ==========================================
@@ -769,14 +738,14 @@ const drawKnockoutGroups = (pool, isWC, randomize) => {
 
 const getAutoFillData = (compId, compsState, forceNames = []) => {
   const isWC = compId === 'C2';
-  let pool = isWC ? [...PRESETS.WC] : buildCLPool(compsState, forceNames);
+  let pool = isWC ? buildDynamicWCPool({ randomize: false }) : buildCLPool(compsState, forceNames);
   pool = pool.map((t, i) => ({ ...t, id: i + 1, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }));
   return drawKnockoutGroups(pool, isWC, false);
 };
 
 const getShuffleData = (compId, compsState) => {
   const isWC = compId === 'C2';
-  let pool = isWC ? [...PRESETS.WC] : buildCLPool(compsState);
+  let pool = isWC ? buildDynamicWCPool({ randomize: true }) : buildCLPool(compsState);
   pool = pool.map((t, i) => ({ ...t, id: i + 1, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }));
   return drawKnockoutGroups(pool, isWC, true);
 };
@@ -979,6 +948,38 @@ const buildSeasonRecord = (teams: any[], currentSeason: number): ChampionRecord 
       bestDefense: leaderBy(teams, t => t.ga || 0, 'min'),
       bestGoalDiff: leaderBy(teams, t => (t.gf || 0) - (t.ga || 0), 'max'),
       mostWins: leaderBy(teams, t => t.w || 0, 'max')
+    }
+  };
+};
+
+// Construye el resumen de torneo para copas/mundiales (campeón + subcampeón de la final)
+const buildCupSeasonRecord = (comp: any, currentSeason: number): ChampionRecord | null => {
+  if (!comp) return null;
+  const final = comp.bracket?.Final?.[0] || comp.bracket?.Final;
+  const t = comp.teams || [];
+  let champ = null;
+  let second = null;
+  if (final && final.sh !== null && final.sh !== undefined) {
+    const winId = (final.sh > final.sa) ? final.hId : (final.sa > final.sh) ? final.aId : (((final.penH || 0) > (final.penA || 0)) ? final.hId : final.aId);
+    const loseId = winId === final.hId ? final.aId : final.hId;
+    champ = t.find((x: any) => x.id === winId);
+    second = t.find((x: any) => x.id === loseId);
+  }
+  if (!champ) return null;
+
+  return {
+    season: currentSeason,
+    champion: {
+      id: champ.id, name: champ.name, pts: champ.pts || 0,
+      gf: champ.gf || 0, ga: champ.ga || 0,
+      color1: champ.color1, color2: champ.color2, isFlag: champ.isFlag
+    },
+    runnerUp: second ? { id: second.id, name: second.name, pts: second.pts || 0 } : null,
+    records: {
+      topScoring: leaderBy(t, (x: any) => x.gf || 0, 'max'),
+      bestDefense: leaderBy(t, (x: any) => x.ga || 0, 'min'),
+      bestGoalDiff: leaderBy(t, (x: any) => (x.gf || 0) - (x.ga || 0), 'max'),
+      mostWins: leaderBy(t, (x: any) => x.w || 0, 'max')
     }
   };
 };
@@ -2251,6 +2252,17 @@ const ConfigPanel = ({ initialComp, compId, onSave, onCancel, onTotalReset }) =>
   const [drawModal, setDrawModal] = useState(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
+  // Estados para anexar nuevos países a la Copa del Mundo
+  const isWC = compId === 'C2' || draft.id === 'C2' || !!draft.isWorldCup || (draft.name || '').includes('Mundial') || (draft.name || '').includes('Copa del Mundo');
+  const [newCountryName, setNewCountryName] = useState('');
+  const [newCountryAtt, setNewCountryAtt] = useState(3);
+  const [newCountryOpp, setNewCountryOpp] = useState(3);
+  const [newCountryDef, setNewCountryDef] = useState(3);
+  const [newCountryColor1, setNewCountryColor1] = useState('#0033a0');
+  const [newCountryColor2, setNewCountryColor2] = useState('#ffffff');
+  const [newCountryRegion, setNewCountryRegion] = useState('EU');
+  const [annexToast, setAnnexToast] = useState(null);
+
   const hasStarted = initialComp.type === 'league' 
     ? (initialComp.matchday > 0 || initialComp.matchday2 > 0 || initialComp.history?.length > 0)
     : (initialComp.matchday > 0 || initialComp.history?.length > 0);
@@ -2264,25 +2276,96 @@ const ConfigPanel = ({ initialComp, compId, onSave, onCancel, onTotalReset }) =>
     }
   };
 
+  const handleCountryNameInput = (nameVal) => {
+    setNewCountryName(nameVal);
+    if (nameVal && nameVal.trim()) {
+      const inferred = inferCountryRegion(nameVal);
+      if (inferred) setNewCountryRegion(inferred);
+    }
+  };
+
+  const handleAnnexCountry = (e) => {
+    e?.preventDefault();
+    const cleanName = (newCountryName || '').trim();
+    if (!cleanName) return;
+
+    const existingList = draft.teams || [];
+    const alreadyExists = existingList.some(t => (t.name || '').toLowerCase() === cleanName.toLowerCase());
+    if (alreadyExists) {
+      setAnnexToast(`⚠️ '${cleanName}' ya está en la lista de selecciones.`);
+      setTimeout(() => setAnnexToast(null), 3000);
+      return;
+    }
+
+    const nextId = existingList.reduce((max, t) => Math.max(max, t.id || 0), 0) + 1;
+    const newTeam = {
+      id: nextId,
+      name: cleanName,
+      att: newCountryAtt,
+      opp: newCountryOpp,
+      def: newCountryDef,
+      color1: newCountryColor1,
+      color2: newCountryColor2,
+      isFlag: true,
+      region: newCountryRegion,
+      p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0
+    };
+
+    setDraft(prev => ({
+      ...prev,
+      teams: [...(prev.teams || []), newTeam]
+    }));
+
+    setNewCountryName('');
+    setAnnexToast(`¡Selección de ${cleanName} anexada a la Copa del Mundo!`);
+    setTimeout(() => setAnnexToast(null), 3500);
+  };
+
+  const handleRemoveTeam = (teamId) => {
+    if (hasStarted) return;
+    setDraft(prev => ({
+      ...prev,
+      teams: (prev.teams || []).filter(t => t.id !== teamId)
+    }));
+  };
+
   const handleDrawUI = (type) => {
     if (hasStarted) return;
-    const isWC = compId === 'C2';
-    // Construir pool usando estado guardado actual para incluir equipos ascendidos
-    const compsState = JSON.parse(window.localStorage.getItem(`${APP_ID}_comps`));
-    const pool = isWC ? [...PRESETS.WC] : buildCLPool(compsState || getDefaultComps());
-    const initializedPool = pool.map((t, i) => ({ ...t, id: i + 1, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }));
+    const isWCTournament = isWC;
+    let pool = [];
+
+    if (isWCTournament) {
+      // Usar selecciones configuradas si existen y completar con el catálogo continental ampliado
+      const customTeams = draft.teams && draft.teams.length > 0 ? [...draft.teams] : [];
+      pool = buildDynamicWCPool({ randomize: type === 'shuffle', customTeams });
+    } else {
+      const compsState = JSON.parse(window.localStorage.getItem(`${APP_ID}_comps`));
+      pool = buildCLPool(compsState || getDefaultComps());
+    }
+
+    const initializedPool = pool.slice(0, 32).map((t, i) => ({ ...t, id: i + 1, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }));
 
     initializedPool.sort((a, b) => (b.att + b.opp + b.def) - (a.att + a.opp + a.def));
     const pots = [
       initializedPool.slice(0, 8), initializedPool.slice(8, 16),
       initializedPool.slice(16, 24), initializedPool.slice(24, 32)
     ];
-    const drawData = drawKnockoutGroups(initializedPool, isWC, type === 'shuffle');
+    const drawData = drawKnockoutGroups(initializedPool, isWCTournament, type === 'shuffle');
     setDrawModal({ step: 'pots', pots, groups: drawData.groups, drawData });
   };
 
+  const detectedCode = isWC ? getCountryCode(newCountryName) : null;
+  const regionLabels = {
+    EU: 'UEFA (Europa)',
+    SA: 'CONMEBOL (Sudamérica)',
+    NA: 'CONCACAF (N. y C. América)',
+    AF: 'CAF (África)',
+    AS: 'AFC (Asia / O. Medio)',
+    OC: 'OFC (Oceanía)'
+  };
+
   return (
-    <div className='flex-grow px-4 pb-24 relative'>
+    <div className='flex-grow px-4 pb-28 relative'>
       {drawModal && (
           <div className='fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-md flex flex-col p-6 overflow-y-auto custom-scrollbar'>
               <h2 className='text-2xl font-black uppercase italic text-yellow-400 text-center mb-6 mt-4 drop-shadow-md'>
@@ -2321,8 +2404,8 @@ const ConfigPanel = ({ initialComp, compId, onSave, onCancel, onTotalReset }) =>
                                            return (
                                                <div key={id} className='flex items-center justify-between text-[10px] bg-black/30 p-2 rounded-xl border border-white/5'>
                                                    <div className='flex items-center gap-2'>
-                                                       <Shield color1={t.color1} color2={t.color2} initial={t.name} size='xs' isFlag={t.isFlag} />
-                                                       <span className='font-bold uppercase'>{t.name}</span>
+                                                       <Shield color1={t?.color1} color2={t?.color2} initial={t?.name} size='xs' isFlag={t?.isFlag} />
+                                                       <span className='font-bold uppercase'>{t?.name}</span>
                                                    </div>
                                                </div>
                                            );
@@ -2342,13 +2425,117 @@ const ConfigPanel = ({ initialComp, compId, onSave, onCancel, onTotalReset }) =>
 
       <div className='flex items-center gap-3 mb-6'>
         <button onClick={onCancel} className='p-2 bg-slate-900/30 backdrop-blur-md rounded-xl active:scale-95 transition-all border border-white/10'><ChevronLeft /></button>
-        <h2 className='text-xl font-black italic uppercase drop-shadow-md'>Ajustes</h2>
+        <div className='flex items-center gap-2'>
+          <h2 className='text-xl font-black italic uppercase drop-shadow-md'>Ajustes</h2>
+          {isWC && <span className='text-[10px] bg-yellow-500/20 text-yellow-300 font-black px-2.5 py-0.5 rounded-full border border-yellow-500/30 uppercase'>Copa del Mundo</span>}
+        </div>
       </div>
+
+      {annexToast && (
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className='mb-4 p-3 bg-emerald-500/20 border border-emerald-500/40 rounded-2xl text-emerald-300 text-xs font-black uppercase text-center shadow-lg flex items-center justify-center gap-2'>
+          <Sparkles size={14} className='text-emerald-400' /> {annexToast}
+        </motion.div>
+      )}
+
+      {/* SECCIÓN ESPECIAL: ANEXAR PAÍSES A LA COPA DEL MUNDO */}
+      {isWC && (
+        <div className='bg-gradient-to-br from-slate-900/90 via-indigo-950/40 to-slate-900/90 backdrop-blur-md rounded-3xl p-5 border-2 border-indigo-500/30 shadow-2xl mb-6 space-y-4'>
+          <div className='flex items-center justify-between'>
+            <div className='flex items-center gap-2'>
+              <div className='w-8 h-8 rounded-xl bg-indigo-500/20 flex items-center justify-center border border-indigo-500/40 text-indigo-300'>
+                <Globe size={18} />
+              </div>
+              <div>
+                <h3 className='text-sm font-black uppercase italic text-indigo-300'>Anexar Selección Nacional</h3>
+                <p className='text-[10px] text-slate-400 font-bold'>Agrega nuevos países con bandera automática y confederación</p>
+              </div>
+            </div>
+            <span className='text-[10px] font-black bg-indigo-900/50 text-indigo-200 px-2.5 py-1 rounded-xl border border-indigo-500/30'>
+              {(draft.teams || []).length} Países
+            </span>
+          </div>
+
+          <div className='flex items-center gap-4 bg-black/40 p-3.5 rounded-2xl border border-white/10'>
+            <Shield color1={newCountryColor1} color2={newCountryColor2} initial={newCountryName || 'País'} size='md' isFlag={true} />
+            <div className='flex-grow space-y-2'>
+              <div>
+                <label className='text-[9px] font-black uppercase text-slate-400 block mb-1'>Nombre del País / Selección:</label>
+                <input
+                  type='text'
+                  value={newCountryName}
+                  onChange={(e) => handleCountryNameInput(e.target.value)}
+                  placeholder='Ej: Venezuela, Costa Rica, Noruega, Japón...'
+                  className='bg-black/50 w-full rounded-xl px-3 py-2 text-xs font-black italic uppercase border border-white/20 focus:border-indigo-400 focus:bg-slate-900 outline-none text-white transition-all placeholder:text-slate-600'
+                />
+              </div>
+              <div className='flex items-center gap-2'>
+                {detectedCode ? (
+                  <span className='text-[9px] font-black uppercase text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-500/30 flex items-center gap-1'>
+                    <Check size={10} /> Bandera oficial: {detectedCode.toUpperCase()}
+                  </span>
+                ) : newCountryName.trim() ? (
+                  <span className='text-[9px] font-black uppercase text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-500/30 flex items-center gap-1'>
+                    <Flag size={10} /> Escudo bicolor configurable
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className='space-y-3 bg-black/20 p-3.5 rounded-2xl border border-white/5'>
+            <div>
+              <label className='text-[9px] font-black uppercase text-slate-400 block mb-1.5'>Confederación / Región:</label>
+              <div className='grid grid-cols-3 gap-1.5'>
+                {Object.entries(regionLabels).map(([code, label]) => (
+                  <button
+                    key={code}
+                    type='button'
+                    onClick={() => setNewCountryRegion(code)}
+                    className={`py-1.5 px-2 rounded-xl text-[9px] font-black uppercase italic transition-all border ${
+                      newCountryRegion === code
+                        ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-500/30 scale-[1.02]'
+                        : 'bg-slate-900/60 text-slate-400 border-white/5 hover:text-white'
+                    }`}
+                  >
+                    {code} · {code === 'EU' ? 'UEFA' : code === 'SA' ? 'CONMEBOL' : code === 'NA' ? 'CONCACAF' : code === 'AF' ? 'CAF' : code === 'AS' ? 'AFC' : 'OFC'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className='grid grid-cols-3 gap-2'>
+              <AttrStepper label="Atk (1-5)" val={newCountryAtt} min={1} max={5} onUpdate={(v) => setNewCountryAtt(v)} />
+              <AttrStepper label="Opp (1-5)" val={newCountryOpp} min={1} max={5} onUpdate={(v) => setNewCountryOpp(v)} />
+              <AttrStepper label="Def (1-4)" val={newCountryDef} min={1} max={4} onUpdate={(v) => setNewCountryDef(v)} />
+            </div>
+
+            <div className='flex items-center justify-between pt-1 border-t border-white/5'>
+              <span className='text-[9px] font-black uppercase text-slate-400'>Colores de Escudo/Camiseta:</span>
+              <div className='flex gap-2 bg-black/40 p-1 rounded-xl border border-white/5'>
+                <input type='color' value={newCountryColor1} onChange={(e) => setNewCountryColor1(e.target.value)} className='w-7 h-7 rounded-lg bg-transparent cursor-pointer border-none p-0' title='Color Principal' />
+                <input type='color' value={newCountryColor2} onChange={(e) => setNewCountryColor2(e.target.value)} className='w-7 h-7 rounded-lg bg-transparent cursor-pointer border-none p-0' title='Color Secundario' />
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={handleAnnexCountry}
+            disabled={!newCountryName.trim()}
+            className={`w-full py-3.5 rounded-2xl font-black uppercase italic tracking-widest text-xs flex items-center justify-center gap-2 transition-all shadow-lg active:scale-95 ${
+              newCountryName.trim()
+                ? 'bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-600 text-white border border-indigo-400 shadow-indigo-500/25 hover:shadow-indigo-500/40 cursor-pointer'
+                : 'bg-slate-800/50 text-slate-500 border border-white/5 cursor-not-allowed'
+            }`}
+          >
+            <Plus size={16} /> Anexar País a la Copa del Mundo
+          </button>
+        </div>
+      )}
 
       <div className='bg-slate-900/30 backdrop-blur-md rounded-2xl p-4 border border-white/10 shadow-lg mb-6'>
         <h3 className='text-xs font-black text-red-400 uppercase italic mb-3 flex items-center gap-2'><AlertTriangle size={14}/> Zona de Peligro</h3>
         <button onClick={() => setShowResetConfirm(true)} className='w-full py-4 bg-gradient-to-r from-red-700/60 via-red-600/50 to-red-700/60 text-red-200 font-black uppercase tracking-widest text-[11px] rounded-2xl border-2 border-red-500/40 active:scale-95 transition-all shadow-[0_0_25px_rgba(239,68,68,0.2)] hover:shadow-[0_0_35px_rgba(239,68,68,0.35)] hover:border-red-400/60 flex items-center justify-center gap-2 italic'>
-           <RotateCcw size={15} className='text-red-300'/> Reiniciar Temporada (Ambas Divisiones)
+           <RotateCcw size={15} className='text-red-300'/> Reiniciar Competición
          </button>
       </div>
 
@@ -2361,7 +2548,7 @@ const ConfigPanel = ({ initialComp, compId, onSave, onCancel, onTotalReset }) =>
                   <div className='w-10 h-10 bg-red-500/20 rounded-full flex items-center justify-center border border-red-500/30'>
                     <AlertTriangle size={20} className='text-red-400' />
                   </div>
-                  <h3 className='text-lg font-black uppercase italic text-red-300 tracking-tight'>Reiniciar Temporada</h3>
+                  <h3 className='text-lg font-black uppercase italic text-red-300 tracking-tight'>Reiniciar Competición</h3>
                 </div>
               </div>
               <div className='px-6 py-5'>
@@ -2391,25 +2578,73 @@ const ConfigPanel = ({ initialComp, compId, onSave, onCancel, onTotalReset }) =>
       )}
 
       {draft.type !== 'league' && (
-        <div className='grid grid-cols-2 gap-2 mb-6'>
-          <button onClick={() => handleDrawUI('auto')} disabled={hasStarted} className={`p-3 border rounded-2xl text-[8px] font-black uppercase italic flex flex-col items-center justify-center gap-1 transition-all backdrop-blur-md ${hasStarted ? 'opacity-40 cursor-not-allowed bg-yellow-900/20 border-yellow-500/10 text-yellow-500/50' : 'bg-yellow-600/20 text-yellow-200 border-yellow-500/40 hover:bg-yellow-600/40 active:scale-95'}`}>
-            <Wand2 size={16}/> Auto-Rellenar
-          </button>
-          <button onClick={() => handleDrawUI('shuffle')} disabled={hasStarted} className={`p-3 border rounded-2xl text-[8px] font-black uppercase italic flex flex-col items-center justify-center gap-1 transition-all backdrop-blur-md ${hasStarted ? 'opacity-40 cursor-not-allowed bg-emerald-900/20 border-emerald-500/10 text-emerald-500/50' : 'bg-emerald-600/20 text-emerald-200 border-emerald-500/40 hover:bg-emerald-600/40 active:scale-95'}`}>
-            <Shuffle size={16}/> Sorteo Dinámico
-          </button>
-          {hasStarted && <p className='col-span-2 text-[8px] text-center text-red-400 font-bold uppercase italic mt-1 drop-shadow-md'>No puedes re-sortear torneos en curso.</p>}
+        <div className='space-y-2 mb-6'>
+          {isWC && (
+            <button
+              onClick={() => {
+                const fresh = buildDynamicWCPool({ randomize: true });
+                setDraft(prev => ({
+                  ...prev,
+                  teams: fresh.map((t, i) => ({ ...t, id: i + 1, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }))
+                }));
+                setAnnexToast('¡32 selecciones clasificadas generadas con variedad continental!');
+                setTimeout(() => setAnnexToast(null), 3000);
+              }}
+              disabled={hasStarted}
+              className={`w-full p-3 border rounded-2xl text-[9px] font-black uppercase italic flex items-center justify-center gap-2 transition-all backdrop-blur-md ${
+                hasStarted
+                  ? 'opacity-40 cursor-not-allowed bg-indigo-950/20 border-indigo-500/10 text-indigo-400/50'
+                  : 'bg-gradient-to-r from-indigo-600/30 via-blue-600/30 to-indigo-600/30 text-indigo-200 border-indigo-400/40 hover:border-indigo-400 hover:bg-indigo-600/40 active:scale-95 shadow-md'
+              }`}
+            >
+              <Globe size={16} className='text-indigo-400' /> Generar Nuevas 32 Clasificadas Variadas (60+ Países)
+            </button>
+          )}
+          <div className='grid grid-cols-2 gap-2'>
+            <button onClick={() => handleDrawUI('auto')} disabled={hasStarted} className={`p-3 border rounded-2xl text-[8px] font-black uppercase italic flex flex-col items-center justify-center gap-1 transition-all backdrop-blur-md ${hasStarted ? 'opacity-40 cursor-not-allowed bg-yellow-900/20 border-yellow-500/10 text-yellow-500/50' : 'bg-yellow-600/20 text-yellow-200 border-yellow-500/40 hover:bg-yellow-600/40 active:scale-95'}`}>
+              <Wand2 size={16}/> Auto-Rellenar
+            </button>
+            <button onClick={() => handleDrawUI('shuffle')} disabled={hasStarted} className={`p-3 border rounded-2xl text-[8px] font-black uppercase italic flex flex-col items-center justify-center gap-1 transition-all backdrop-blur-md ${hasStarted ? 'opacity-40 cursor-not-allowed bg-emerald-900/20 border-emerald-500/10 text-emerald-500/50' : 'bg-emerald-600/20 text-emerald-200 border-emerald-500/40 hover:bg-emerald-600/40 active:scale-95'}`}>
+              <Shuffle size={16}/> Sorteo Dinámico
+            </button>
+          </div>
+          {hasStarted && <p className='text-[8px] text-center text-red-400 font-bold uppercase italic mt-1 drop-shadow-md'>No puedes re-sortear torneos en curso.</p>}
         </div>
       )}
+
+      <div className='flex items-center justify-between mb-3 px-1'>
+        <h3 className='text-xs font-black uppercase italic text-slate-300'>
+          {isWC ? `Selecciones en el Torneo (${(currentTeams || []).length})` : `Equipos Configurados (${(currentTeams || []).length})`}
+        </h3>
+        {isWC && <span className='text-[9px] text-slate-400 font-bold'>Se sortearán 32 selecciones a los grupos A-H</span>}
+      </div>
 
       <div className='grid gap-4'>
         {(!Array.isArray(currentTeams) || currentTeams.length === 0) && <div className='text-center py-10 bg-slate-900/30 backdrop-blur-md rounded-[2rem] border border-dashed border-white/20'><p className='text-[10px] font-bold text-slate-300 uppercase italic'>No hay equipos configurados.</p></div>}
         {Array.isArray(currentTeams) && currentTeams.map(t => (
-          <div key={t.id} className='bg-slate-900/30 backdrop-blur-md p-5 rounded-[2rem] border border-white/10 shadow-lg space-y-4'>
+          <div key={t.id} className='bg-slate-900/30 backdrop-blur-md p-5 rounded-[2rem] border border-white/10 shadow-lg space-y-4 relative group'>
             <div className='flex items-center gap-4'>
               <Shield color1={t?.color1} color2={t?.color2} initial={t?.name} size='lg' isFlag={t?.isFlag} />
               <div className='flex-grow'>
-                <input className='bg-black/30 w-full rounded-xl p-2 text-sm font-black italic uppercase border border-white/10 focus:border-blue-500 focus:bg-slate-800/80 outline-none text-white transition-colors backdrop-blur-sm' value={t?.name} onChange={(e) => updateTeamAttr(t.id, 'name', e.target.value)} />
+                <div className='flex items-center gap-2'>
+                  <input className='bg-black/30 w-full rounded-xl p-2 text-sm font-black italic uppercase border border-white/10 focus:border-blue-500 focus:bg-slate-800/80 outline-none text-white transition-colors backdrop-blur-sm' value={t?.name} onChange={(e) => updateTeamAttr(t.id, 'name', e.target.value)} />
+                  {isWC && !hasStarted && (
+                    <button
+                      onClick={() => handleRemoveTeam(t.id)}
+                      title='Eliminar selección'
+                      className='p-2 bg-red-950/40 border border-red-500/30 text-red-400 hover:bg-red-900/60 rounded-xl transition-all active:scale-95 shrink-0'
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+                {isWC && t.region && (
+                  <div className='mt-1.5 flex items-center gap-1.5'>
+                    <span className='text-[8px] font-black uppercase px-2 py-0.5 rounded-md bg-indigo-950/60 text-indigo-300 border border-indigo-500/20'>
+                      Región: {regionLabels[t.region] || t.region}
+                    </span>
+                  </div>
+                )}
                 <div className='grid grid-cols-3 gap-2 mt-3'>
                   <AttrStepper label="Atk (1-5)" val={t.att} min={1} max={5} onUpdate={(v) => updateTeamAttr(t.id, 'att', v)} />
                   <AttrStepper label="Opp (1-5)" val={t.opp} min={1} max={5} onUpdate={(v) => updateTeamAttr(t.id, 'opp', v)} />
@@ -2426,10 +2661,77 @@ const ConfigPanel = ({ initialComp, compId, onSave, onCancel, onTotalReset }) =>
       </div>
 
       <div className='fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-xs px-6 z-50'>
-        <button onClick={() => onSave(draft)} className='w-full bg-blue-600/80 backdrop-blur-md text-white py-4 rounded-2xl font-black uppercase italic tracking-widest shadow-[0_10px_20px_rgba(0,0,0,0.5)] flex items-center justify-center gap-2 active:scale-95 transition-all border border-blue-400'><Save size={18} /> Guardar Cambios</button>
+        <button onClick={() => onSave(draft)} className='w-full bg-blue-600/90 backdrop-blur-md text-white py-4 rounded-2xl font-black uppercase italic tracking-widest shadow-[0_10px_20px_rgba(0,0,0,0.5)] flex items-center justify-center gap-2 active:scale-95 transition-all border border-blue-400'><Save size={18} /> Guardar Cambios</button>
       </div>
     </div>
   );
+};
+
+const getPresetStatsForTeam = (teamName: string) => {
+  if (!teamName) return null;
+  for (const list of Object.values(PRESETS)) {
+    if (!Array.isArray(list)) continue;
+    const found = list.find((t: any) => t.name === teamName);
+    if (found) return { att: found.att, opp: found.opp, def: found.def };
+  }
+  for (const list of Object.values(PRESETS_2)) {
+    if (!Array.isArray(list)) continue;
+    const found = list.find((t: any) => t.name === teamName);
+    if (found) return { att: found.att, opp: found.opp, def: found.def };
+  }
+  return null;
+};
+
+const restoreClubOriginalStatsInComps = (prevComps: any, origStats: any, teamNameFallback?: string) => {
+  if (!prevComps) return prevComps;
+  const targetId = origStats?.teamId;
+  let att = origStats?.att;
+  let opp = origStats?.opp;
+  let def = origStats?.def;
+
+  if (att === undefined || opp === undefined || def === undefined) {
+    const presetMatch = getPresetStatsForTeam(teamNameFallback || '');
+    if (presetMatch) {
+      att = presetMatch.att;
+      opp = presetMatch.opp;
+      def = presetMatch.def;
+    }
+  }
+
+  if (att === undefined || opp === undefined || def === undefined) return prevComps;
+
+  let modified = false;
+  const nextComps = { ...prevComps };
+
+  for (const compId of Object.keys(nextComps)) {
+    const comp = nextComps[compId];
+    if (!comp) continue;
+
+    let newTeams = comp.teams;
+    let newTeams2 = comp.teams2;
+
+    if (Array.isArray(newTeams)) {
+      const matchIdx = newTeams.findIndex((t: any) => (targetId && t.id === targetId) || (teamNameFallback && t.name === teamNameFallback));
+      if (matchIdx >= 0) {
+        newTeams = newTeams.map((t: any, i: number) => i === matchIdx ? { ...t, att, opp, def } : t);
+        modified = true;
+      }
+    }
+
+    if (Array.isArray(newTeams2)) {
+      const matchIdx = newTeams2.findIndex((t: any) => (targetId && t.id === targetId) || (teamNameFallback && t.name === teamNameFallback));
+      if (matchIdx >= 0) {
+        newTeams2 = newTeams2.map((t: any, i: number) => i === matchIdx ? { ...t, att, opp, def } : t);
+        modified = true;
+      }
+    }
+
+    if (modified) {
+      nextComps[compId] = { ...comp, teams: newTeams, teams2: newTeams2 };
+    }
+  }
+
+  return modified ? nextComps : prevComps;
 };
 
 // ==========================================
@@ -2505,7 +2807,7 @@ function DiceFootballApp() {
   // Recupera en el registro permanente cualquier edición que todavía exista
   // en el historial visual de una partida creada antes del palmarés acumulativo.
   useEffect(() => {
-    const recoverableTitles = [];
+    const recoverableTitles: any[] = [];
     LEAGUE_IDS.forEach(id => {
       const comp = comps[id];
       if (!comp) return;
@@ -2526,6 +2828,48 @@ function DiceFootballApp() {
         });
       });
     });
+
+    // Copas y torneos (Champions League C1 y Copa del Mundo C2)
+    ['C1', 'C2'].forEach(id => {
+      const cup = comps[id];
+      if (!cup) return;
+      (cup.championsHistory || []).forEach((record: any) => {
+        if (!record?.champion) return;
+        recoverableTitles.push({
+          compId: id,
+          compName: cup.name,
+          type: 'cup',
+          div: 1,
+          winner: record.champion,
+          season: record.season
+        });
+      });
+    });
+
+    // Historial del modo carrera
+    (career?.seasonHistory || []).forEach((sh: any) => {
+      if (sh.isLeagueChampion || sh.position === 1) {
+        recoverableTitles.push({
+          compId: sh.compId || career.compId || 'L1',
+          compName: sh.compName || 'Liga',
+          type: 'league',
+          div: sh.div || 1,
+          winner: { name: sh.teamName },
+          season: sh.season || 1
+        });
+      }
+      if (sh.isClChampion || (sh.clResult && sh.clResult.includes('Campeón'))) {
+        recoverableTitles.push({
+          compId: 'C1',
+          compName: 'Champions League',
+          type: 'cup',
+          div: 1,
+          winner: { name: sh.teamName },
+          season: sh.season || 1
+        });
+      }
+    });
+
     registerTitles(recoverableTitles);
     // La recuperación solo se ejecuta al cargar la partida.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2566,7 +2910,7 @@ function DiceFootballApp() {
     const seasonNow = seasonState.season || 1;
     // Palmarés acumulativo (infinito): todos los campeones se guardan en una
     // única escritura para que un cierre interrumpido no deje ligas sin registrar.
-    const seasonTitles = [];
+    const seasonTitles: any[] = [];
     LEAGUE_IDS.forEach(id => {
       const c = comps[id];
       if (!c) return;
@@ -2575,6 +2919,20 @@ function DiceFootballApp() {
       if (r1) seasonTitles.push({ compId: id, compName: c.name, type: 'league', div: 1, winner: r1.champion, season: seasonNow });
       if (r2) seasonTitles.push({ compId: id, compName: c.name, type: 'league', div: 2, winner: r2.champion, season: seasonNow });
     });
+    const c1 = comps['C1'];
+    if (c1) {
+      const clRecord = buildCupSeasonRecord(c1, seasonNow);
+      if (clRecord?.champion) {
+        seasonTitles.push({ compId: 'C1', compName: c1.name || 'Champions League', type: 'cup', div: 1, winner: clRecord.champion, season: seasonNow });
+      }
+    }
+    const c2 = comps['C2'];
+    if (c2) {
+      const wcRecord = buildCupSeasonRecord(c2, seasonNow);
+      if (wcRecord?.champion) {
+        seasonTitles.push({ compId: 'C2', compName: c2.name || 'Copa del Mundo', type: 'cup', div: 1, winner: wcRecord.champion, season: seasonNow });
+      }
+    }
     registerTitles(seasonTitles);
     setComps(prev => {
       const next = { ...prev };
@@ -2743,8 +3101,29 @@ function DiceFootballApp() {
     if (winner) {
       registerTitle({
         compId, compName: comp.name, type: comp.type === 'league' ? 'league' : 'cup',
-        div, winner, season: currentSeasonNum
+        div, winner: {
+          name: winner.name,
+          color1: winner.color1,
+          color2: winner.color2,
+          isFlag: winner.isFlag
+        }, season: currentSeasonNum
       });
+      if (comp.type !== 'league') {
+        const cupRecord = buildCupSeasonRecord(comp, currentSeasonNum);
+        if (cupRecord) {
+          setComps(prev => {
+            const current = prev[compId];
+            if (!current) return prev;
+            return {
+              ...prev,
+              [compId]: {
+                ...current,
+                championsHistory: pushRecord(cupRecord, current.championsHistory)
+              }
+            };
+          });
+        }
+      }
     }
   };
 
@@ -3040,25 +3419,9 @@ function DiceFootballApp() {
   }, [pastCareers]);
 
   const handleDeleteCareerHard = () => {
-    // Restaurar atributos del club en la liga si fueron mejorados
-    if (career.teamId && career.originalTeamStats && career.originalTeamStats.teamId === career.teamId) {
-      const prevCompId = career.compId || career.originalTeamStats.compId;
-      const prevTeamsKey = (career.div === 2 || career.originalTeamStats.div === 2) ? 'teams2' : 'teams';
-      setComps(prev => {
-        const comp = prev[prevCompId];
-        if (!comp) return prev;
-        return {
-          ...prev,
-          [prevCompId]: {
-            ...comp,
-            [prevTeamsKey]: (comp[prevTeamsKey] || []).map(t =>
-              t.id === career.teamId
-                ? { ...t, att: career.originalTeamStats.att, opp: career.originalTeamStats.opp, def: career.originalTeamStats.def }
-                : t
-            )
-          }
-        };
-      });
+    // Restaurar atributos originales del club en la liga si fueron mejorados con PE
+    if (career.originalTeamStats || careerTeam) {
+      setComps(prev => restoreClubOriginalStatsInComps(prev, career.originalTeamStats, careerTeam?.name));
     }
 
     setCareer({ ...DEFAULT_CAREER });
@@ -3109,25 +3472,9 @@ function DiceFootballApp() {
 
     setPastCareers(prev => [archiveEntry, ...prev]);
 
-    // Restaurar atributos del club en la liga si fueron mejorados
-    if (career.teamId && career.originalTeamStats && career.originalTeamStats.teamId === career.teamId) {
-      const prevCompId = career.compId || career.originalTeamStats.compId;
-      const prevTeamsKey = (career.div === 2 || career.originalTeamStats.div === 2) ? 'teams2' : 'teams';
-      setComps(prev => {
-        const comp = prev[prevCompId];
-        if (!comp) return prev;
-        return {
-          ...prev,
-          [prevCompId]: {
-            ...comp,
-            [prevTeamsKey]: (comp[prevTeamsKey] || []).map(t =>
-              t.id === career.teamId
-                ? { ...t, att: career.originalTeamStats.att, opp: career.originalTeamStats.opp, def: career.originalTeamStats.def }
-                : t
-            )
-          }
-        };
-      });
+    // Restaurar atributos originales del club en la liga si fueron mejorados con PE
+    if (career.originalTeamStats || careerTeam) {
+      setComps(prev => restoreClubOriginalStatsInComps(prev, career.originalTeamStats, careerTeam?.name));
     }
 
     setCareer({ ...DEFAULT_CAREER });
@@ -3196,7 +3543,7 @@ function DiceFootballApp() {
 
   // RESTAURACIÓN Y PROTECCIÓN DE ESTADÍSTICAS DEL EQUIPO (Estadísticas originales + mejoras de P/E)
   useEffect(() => {
-    if (!career.active || !career.teamId || !careerTeam) return;
+    if (!career.active || !career.teamId || !careerTeam || career.fired) return;
 
     // Estadísticas base auténticas del club del usuario (originales + mejoras de PE aplicadas)
     const base = {
@@ -3235,7 +3582,7 @@ function DiceFootballApp() {
         };
       });
     }
-  }, [career.active, career.teamId, career.compId, career.div, careerMd, careerTeam]);
+  }, [career.active, career.teamId, career.compId, career.div, careerMd, careerTeam, career.fired]);
 
   // Garantizar ofertas de rescate activas si el mánager está despedido y no tiene ofertas en su buzón
   useEffect(() => {
@@ -3270,24 +3617,8 @@ function DiceFootballApp() {
     if (!team) return;
 
     // Si ya había un club previo con estadísticas modificadas, restaurar el club anterior
-    if (career.teamId && career.originalTeamStats && career.originalTeamStats.teamId === career.teamId) {
-      const prevCompId = career.compId || career.originalTeamStats.compId;
-      const prevTeamsKey = (career.div === 2 || career.originalTeamStats.div === 2) ? 'teams2' : 'teams';
-      setComps(prev => {
-        const comp = prev[prevCompId];
-        if (!comp) return prev;
-        return {
-          ...prev,
-          [prevCompId]: {
-            ...comp,
-            [prevTeamsKey]: (comp[prevTeamsKey] || []).map(t =>
-              t.id === career.teamId
-                ? { ...t, att: career.originalTeamStats.att, opp: career.originalTeamStats.opp, def: career.originalTeamStats.def }
-                : t
-            )
-          }
-        };
-      });
+    if (career.originalTeamStats || careerTeam) {
+      setComps(prev => restoreClubOriginalStatsInComps(prev, career.originalTeamStats, careerTeam?.name));
     }
 
     setCareer(c => ({
@@ -4655,7 +4986,7 @@ function DiceFootballApp() {
     let comp = JSON.parse(JSON.stringify(initialComp));
     const targetId = comp.id || compId || (comp.name?.includes('Champions') || (Array.isArray(comp.groups) && comp.groups.length === 8) ? 'C1' : 'C2');
     comp.id = targetId;
-    const isChampions = targetId === 'C1' || comp.name?.includes('Champions') || (Array.isArray(comp.groups) && comp.groups.length === 8);
+    const isChampions = (targetId === 'C1' || comp.name?.includes('Champions')) && targetId !== 'C2' && !comp.name?.includes('Mundial') && !comp.name?.includes('World');
     const isWorldCup = targetId === 'C2' || comp.name?.includes('Mundial') || comp.name?.includes('World');
     let guard = 0;
 
@@ -4946,6 +5277,9 @@ function DiceFootballApp() {
     if (!review) return;
     setCareerReview(review);
     if (!alreadyProcessed) {
+      if (review.fired && (career.originalTeamStats || careerTeam)) {
+        setComps(prev => restoreClubOriginalStatsInComps(prev, career.originalTeamStats, careerTeam?.name));
+      }
       setCareer(c => ({
         ...c,
         reputation: review.repAfter,
@@ -4971,11 +5305,45 @@ function DiceFootballApp() {
             repAfter: review.repAfter, note: review.note,
             objectivesMet: review.objectivesMet, objectivesTotal: review.objectivesTotal,
             clResult: review.clResult, promoted: c.div === 2 && review.position <= 3,
-            fired: review.fired
+            fired: review.fired,
+            isLeagueChampion: review.position === 1,
+            isClChampion: !!(review.clResult && review.clResult.includes('Campeón'))
           },
           ...(c.seasonHistory || [])
         ]
       }));
+
+      // Registrar títulos ganados en el modo carrera en el palmarés persistente
+      if (review.position === 1 && careerTeam) {
+        registerTitle({
+          compId: career.compId,
+          compName: review.compName || comps[career.compId]?.name || 'Liga',
+          type: 'league',
+          div: career.div,
+          winner: {
+            name: careerTeam.name,
+            color1: careerTeam.color1,
+            color2: careerTeam.color2,
+            isFlag: careerTeam.isFlag
+          },
+          season: review.season
+        });
+      }
+      if (review.clResult?.includes('Campeón') && careerTeam) {
+        registerTitle({
+          compId: 'C1',
+          compName: 'Champions League',
+          type: 'cup',
+          div: 1,
+          winner: {
+            name: careerTeam.name,
+            color1: careerTeam.color1,
+            color2: careerTeam.color2,
+            isFlag: careerTeam.isFlag
+          },
+          season: review.season
+        });
+      }
     }
   };
 
@@ -4984,24 +5352,8 @@ function DiceFootballApp() {
   // El club previo recupera sus estadísticas de fuerza originales.
   const acceptCareerOffer = (offer) => {
     // Si el entrenador cambia de club, el club que entrenaba recupera sus estadísticas de fuerza originales
-    if (career.teamId && career.originalTeamStats && career.originalTeamStats.teamId === career.teamId) {
-      const prevCompId = career.compId || career.originalTeamStats.compId;
-      const prevTeamsKey = (career.div === 2 || career.originalTeamStats.div === 2) ? 'teams2' : 'teams';
-      setComps(prev => {
-        const comp = prev[prevCompId];
-        if (!comp) return prev;
-        return {
-          ...prev,
-          [prevCompId]: {
-            ...comp,
-            [prevTeamsKey]: (comp[prevTeamsKey] || []).map(t =>
-              t.id === career.teamId
-                ? { ...t, att: career.originalTeamStats.att, opp: career.originalTeamStats.opp, def: career.originalTeamStats.def }
-                : t
-            )
-          }
-        };
-      });
+    if (career.originalTeamStats || careerTeam) {
+      setComps(prev => restoreClubOriginalStatsInComps(prev, career.originalTeamStats, careerTeam?.name));
     }
 
     const teams = offer.div === 2 ? comps[offer.compId]?.teams2 : comps[offer.compId]?.teams;
@@ -5367,7 +5719,7 @@ function DiceFootballApp() {
 
     } else {
        // Eliminatorias
-       const isChampions = cId === 'C1' || currentComp.id === 'C1' || currentComp.name?.includes('Champions') || (Array.isArray(currentComp.groups) && currentComp.groups.length === 8);
+       const isChampions = (cId === 'C1' || currentComp.id === 'C1' || currentComp.name?.includes('Champions')) && cId !== 'C2' && currentComp.id !== 'C2' && !currentComp.name?.includes('Mundial') && !currentComp.name?.includes('World');
        const phase = currentComp.phase;
        const isVuelta = isChampions && currentComp.matchday % 2 !== 0 && phase !== 'Final';
        const newBracket = { ...currentComp.bracket };
@@ -5619,11 +5971,15 @@ function DiceFootballApp() {
 
   const handleTotalReset = (compId) => {
     const defaultData = getDefaultComps()[compId];
+    const prevHistory = comps[compId]?.championsHistory || [];
+    const prevHistory2 = comps[compId]?.championsHistory2 || [];
     updateActiveComp({
       teams: defaultData.teams,
       teams2: defaultData.teams2,
       matchday: 0, matchday2: 0, history: [], history2: [],
-      showWinner: false, showWinner2: false, phase: defaultData.phase, bracket: null
+      showWinner: false, showWinner2: false, phase: defaultData.phase, bracket: null,
+      championsHistory: prevHistory,
+      championsHistory2: prevHistory2
     });
     setCompView('main');
   };
@@ -5877,11 +6233,11 @@ function DiceFootballApp() {
 
         {showChampionsHistory && (
           <ChampionsHistoryModal
-            championsHistory={(viewDiv === 2 ? activeComp?.championsHistory2 : activeComp?.championsHistory) || []}
-            title={`Palmarés · ${activeComp?.name || 'Liga'} · ${viewDiv === 2 ? '2ª' : '1ª'} Div.`}
+            championsHistory={(isLeague ? (isDiv2 ? activeComp?.championsHistory2 : activeComp?.championsHistory) : activeComp?.championsHistory) || []}
+            title={`Palmarés · ${activeComp?.name || 'Competición'}${isLeague ? ` · ${isDiv2 ? '2ª' : '1ª'} Div.` : ''}`}
             compId={activeCompId}
-            div={viewDiv === 2 ? 2 : 1}
-            showTopWinners={activeComp?.type === 'league'}
+            div={isLeague && isDiv2 ? 2 : 1}
+            showTopWinners={true}
             onClose={() => setShowChampionsHistory(false)}
           />
         )}
@@ -6484,7 +6840,15 @@ function DiceFootballApp() {
               {activeComp.type !== 'league' && <span className='text-[8px] font-black text-blue-300 uppercase tracking-widest drop-shadow-md'>Fase: {activeComp.phase}</span>}
             </div>
           </div>
-          <button onClick={manualSave} className='p-2 bg-blue-600/30 text-blue-300 rounded-xl border border-blue-500/40 active:scale-95'><Save size={18}/></button>
+          <div className='flex items-center gap-2'>
+            <button
+              onClick={() => setShowChampionsHistory(true)}
+              className='flex items-center gap-1.5 px-3 py-2 bg-amber-500/20 text-amber-300 rounded-xl border border-amber-400/40 text-[9px] font-black uppercase tracking-wider active:scale-95 transition-all shadow-md'
+            >
+              <Trophy size={13} className='text-amber-400' /> Palmarés
+            </button>
+            <button onClick={manualSave} className='p-2 bg-blue-600/30 text-blue-300 rounded-xl border border-blue-500/40 active:scale-95'><Save size={18}/></button>
+          </div>
         </header>
 
         {isLeague && (
@@ -6926,7 +7290,19 @@ function DiceFootballApp() {
                                 <div className='flex items-center justify-between'>
                                   <div className='flex items-center gap-2 w-28'><Shield color1={home?.color1} color2={home?.color2} initial={home?.name} size='xs' isFlag={home?.isFlag} /><span className={`text-[9px] font-bold uppercase truncate italic ${passWinner?.id === home?.id ? 'text-amber-300 font-black' : ''}`}>{home?.name || 'TBD'}</span></div>
                                   <div className='flex flex-col items-center flex-1'>
-                                    {isPlayedIda ? <div className='flex items-center gap-2 bg-slate-800/60 px-1.5 rounded'><span className='text-[10px] font-black tabular-nums'>{m.sh} - {m.sa}</span><span className='text-[7px] font-bold text-slate-400 uppercase italic'>Ida</span></div> : <span className='text-[8px] font-black text-slate-500 italic'>VS (Ida)</span>}
+                                    {isPlayedIda ? (
+                                      <div className='flex flex-col items-center gap-0.5'>
+                                        <div className='flex items-center gap-1.5 bg-slate-800/60 px-2 py-0.5 rounded'>
+                                          <span className='text-[10px] font-black tabular-nums'>{m.sh} - {m.sa}</span>
+                                          {isTwoLegged && <span className='text-[7px] font-bold text-slate-400 uppercase italic'>Ida</span>}
+                                        </div>
+                                        {!isTwoLegged && m.penH !== null && m.penH !== undefined && (
+                                          <span className='text-[7.5px] text-amber-300 font-black'>({m.penH}-{m.penA} pen)</span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className='text-[8px] font-black text-slate-500 italic'>{isTwoLegged ? 'VS (Ida)' : 'VS'}</span>
+                                    )}
                                   </div>
                                   <div className='flex items-center gap-2 w-28 justify-end'><span className={`text-[9px] font-bold uppercase truncate italic text-right ${passWinner?.id === away?.id ? 'text-amber-300 font-black' : ''}`}>{away?.name || 'TBD'}</span><Shield color1={away?.color1} color2={away?.color2} initial={away?.name} size='xs' isFlag={away?.isFlag} /></div>
                                 </div>
