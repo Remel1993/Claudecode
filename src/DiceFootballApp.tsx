@@ -784,7 +784,7 @@ const getShuffleData = (compId, compsState) => {
 const generateKnockoutBrackets = (comp) => {
   if (!comp || !Array.isArray(comp.groups) || !Array.isArray(comp.teams)) return null;
   const groupResults = comp.groups.map(g => {
-    const teams = comp.teams.filter(t => g.teamIds && g.teamIds.includes(t.id)).sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga));
+    const teams = comp.teams.filter(t => g.teamIds && g.teamIds.includes(t.id)).sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf);
     return { first: teams[0], second: teams[1] };
   });
 
@@ -2634,11 +2634,37 @@ function DiceFootballApp() {
       }
     }
 
+    const seasonNow = seasonState.season || 1;
+    const seasonTitles: any[] = [];
     setComps(prev => {
       const next = { ...prev };
       LEAGUE_IDS.forEach(id => {
-        const c = next[id];
+        let c = next[id];
         if (!c) return;
+        // Garantizar que ligas con jornadas pendientes (ej. 38 jornadas frente a ligas de 34) queden 100% resueltas antes del nuevo año
+        if (!leagueSeasonOver(c)) {
+          const runDivToFinish = (teamsKey: string, mdKey: string, histKey: string, winKey: string) => {
+            let guard = 0;
+            const total = divTotalRounds(c[teamsKey]);
+            while ((c[mdKey] || 0) < total && guard++ < 80) {
+              const res = simulateDivisionMatchday(c[teamsKey], c[mdKey] || 0, c[histKey] || []);
+              if (!res) break;
+              c = {
+                ...c,
+                [teamsKey]: res.updatedTeams,
+                [mdKey]: res.nextMatchday,
+                [histKey]: res.newHistory,
+                [winKey]: res.isFinished ? true : c[winKey]
+              };
+            }
+          };
+          runDivToFinish('teams', 'matchday', 'history', 'showWinner');
+          runDivToFinish('teams2', 'matchday2', 'history2', 'showWinner2');
+        }
+        const r1 = buildSeasonRecord(c.teams, seasonNow);
+        const r2 = buildSeasonRecord(c.teams2, seasonNow);
+        if (r1) seasonTitles.push({ compId: id, compName: c.name, type: 'league', div: 1, winner: r1.champion, season: seasonNow });
+        if (r2) seasonTitles.push({ compId: id, compName: c.name, type: 'league', div: 2, winner: r2.champion, season: seasonNow });
         const ns = computeLeagueNewSeason(c) || {};
         next[id] = {
           ...c, ...ns,
@@ -2650,6 +2676,9 @@ function DiceFootballApp() {
       next['C1'] = { ...defaults['C1'] };
       return next;
     });
+    if (seasonTitles.length > 0) {
+      registerTitles(seasonTitles);
+    }
     setSeasonState(s => ({ season: (s.season || 1) + 1, globalMatchday: 1, phase: 'leagues' }));
     setCareer(c => (c.active ? {
       ...c,
@@ -2774,8 +2803,7 @@ function DiceFootballApp() {
     setMatchState({
       home, away, scoreH: 0, scoreA: 0, oppH: home.opp, oppA: away.opp, turn: 'H', phase: 'att', isDiv2Context,
       logs: ['⚽ ¡Comienza el encuentro!', aggregate ? `📊 Global: ${aggregate.sh} - ${aggregate.sa}` : 'Al terreno de juego.'],
-      lastDie: 1, finished: false, isKnockout: activeComp.type === 'knockout' || (activeComp.type === 'cup' && activeComp.phase !== 'groups'),
-      penalties: null, aggregate, isChampions: activeCompId === 'C1', isVuelta, championsPhase: activeComp.phase
+      lastDie: 1, finished: false, isKnockout: activeComp.type === 'knockout' || (activeComp.type === 'cup' && activeComp.phase !== 'groups'), penalties: null, aggregate
     });
     setCompView('playing');
   };
@@ -2860,15 +2888,9 @@ function DiceFootballApp() {
     if (nextTurn === 'A' && nextOppA <= 0) nextTurn = 'H';
 
     if (nextOppH <= 0 && nextOppA <= 0) {
-      // Preferimos el Ida/Vuelta y la fase ya fijados al arrancar ESTE partido (state.isVuelta/state.championsPhase).
-      // Recalcularlos desde activeComp aquí es incorrecto para partidos de Champions del modo carrera, donde
-      // activeComp puede reflejar otra competición o una fase distinta a la que realmente se está jugando.
-      const hasExplicitContext = typeof state.isVuelta === 'boolean';
-      const isChampions = hasExplicitContext ? !!state.isChampions : activeCompId === 'C1';
-      const currentPhase = hasExplicitContext ? state.championsPhase : activeComp.phase;
-      const isTwoLegged = isChampions && currentPhase !== 'Final' && currentPhase !== 'groups';
-      const isIda = isTwoLegged && (hasExplicitContext ? !state.isVuelta : activeComp.matchday % 2 === 0);
-      const isVuelta = isTwoLegged && (hasExplicitContext ? !!state.isVuelta : activeComp.matchday % 2 !== 0);
+      const isChampions = activeCompId === 'C1';
+      const isIda = isChampions && activeComp.matchday % 2 === 0 && activeComp.phase !== 'Final' && activeComp.phase !== 'groups';
+      const isVuelta = isChampions && activeComp.matchday % 2 !== 0 && activeComp.phase !== 'Final' && activeComp.phase !== 'groups';
       let needsPenalties = state.isKnockout && state.scoreH === state.scoreA && !isIda && !isVuelta;
       if (isVuelta && state.aggregate) if (state.aggregate.sh + state.scoreH === state.aggregate.sa + state.scoreA) needsPenalties = true;
 
@@ -3682,11 +3704,20 @@ function DiceFootballApp() {
         }
       }
 
-      // Caducidad de ofertas en el buzón: solo se quedan por 2 semanas y luego se limpia el buzón
-      const prunedOffers = (c.offers || []).map(o => {
-        const currentWeeks = typeof o.weeksRemaining === 'number' ? o.weeksRemaining : 2;
-        return { ...o, weeksRemaining: currentWeeks - 1 };
-      }).filter(o => o.weeksRemaining > 0);
+      // Caducidad de ofertas en el buzón:
+      // Las ofertas activas reducen sus semanas (2 -> 1 -> 0 [Expirada con alerta visual en buzón]).
+      // Las ofertas que ya estaban expiradas en la jornada previa (weeksRemaining <= 0) se retiran definitivamente.
+      const prunedOffers = (c.offers || [])
+        .filter(o => (typeof o.weeksRemaining === 'number' ? o.weeksRemaining : 2) > 0)
+        .map(o => {
+          const currentWeeks = typeof o.weeksRemaining === 'number' ? o.weeksRemaining : 2;
+          const newWeeks = currentWeeks - 1;
+          return {
+            ...o,
+            weeksRemaining: newWeeks,
+            expired: newWeeks <= 0
+          };
+        });
 
       const finalOffers = newOffer
         ? [newOffer, ...prunedOffers.filter(o => o.id !== newOffer.id)]
@@ -4313,7 +4344,7 @@ function DiceFootballApp() {
           peGained: totalPeGained,
           matchPeGained,
           trainingPeGained: extraTrainingPe,
-          trainingResult: (trainingFeedback || (c.trainedMatchKey === currentMatchKey ? c.lastTrainingResult : null)) || undefined,
+          trainingFeedback,
           repGained,
           headline: `⭐ UEFA Champions League · ${clPhaseLabel(currentPhase)}`,
           summary: isChampionsWinner
@@ -4697,22 +4728,41 @@ function DiceFootballApp() {
 
           if (phase === 'Octavos') {
             nextPhase = 'Cuartos';
-            newBracket.Cuartos = Array(4).fill(0).map((_, i) => ({ id: 'C' + (i + 1), hId: winners[i * 2], aId: winners[i * 2 + 1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null }));
+            newBracket.Cuartos = Array(4).fill(0).map((_, i) => ({
+              id: 'C' + (i + 1),
+              hId: winners[i * 2] ?? comp.teams?.[i * 2]?.id ?? 0,
+              aId: winners[i * 2 + 1] ?? comp.teams?.[i * 2 + 1]?.id ?? 1,
+              sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null
+            }));
           } else if (phase === 'Cuartos') {
             nextPhase = 'Semis';
-            newBracket.Semis = Array(2).fill(0).map((_, i) => ({ id: 'S' + (i + 1), hId: winners[i * 2], aId: winners[i * 2 + 1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null }));
+            newBracket.Semis = Array(2).fill(0).map((_, i) => ({
+              id: 'S' + (i + 1),
+              hId: winners[i * 2] ?? comp.teams?.[i * 2]?.id ?? 0,
+              aId: winners[i * 2 + 1] ?? comp.teams?.[i * 2 + 1]?.id ?? 1,
+              sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null
+            }));
           } else if (phase === 'Semis') {
             nextPhase = 'Final';
-            newBracket.Final = [{ id: 'F1', hId: winners[0], aId: winners[1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null }];
+            newBracket.Final = [{
+              id: 'F1',
+              hId: winners[0] ?? comp.teams?.[0]?.id ?? 0,
+              aId: winners[1] ?? comp.teams?.[1]?.id ?? 1,
+              sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null
+            }];
           } else {
             nextPhase = 'Terminado';
             showWinner = true;
           }
         }
 
+        const dayLabel = phase === 'Final'
+          ? 'Gran Final'
+          : (phase + (isChampions ? (isVuelta ? ' (Vuelta)' : ' (Ida)') : ''));
+
         comp = {
           ...comp,
-          history: [{ day: phase + (isChampions ? (isVuelta ? ' (Vuelta)' : ' (Ida)') : ''), results: allResults }, ...(comp.history || [])],
+          history: [{ day: dayLabel, results: allResults }, ...(comp.history || [])],
           matchday: (comp.matchday || 0) + 1,
           phase: nextPhase,
           bracket: newBracket,
@@ -4843,40 +4893,42 @@ function DiceFootballApp() {
     const season = seasonState.season || 1;
     // Una vez firmado (renovación o club nuevo) no se vuelve a abrir el balance
     if (career.signedForSeason === season) return;
-    if (career.lastProcessedSeason === season) return;
+    const alreadyProcessed = career.lastProcessedSeason === season;
     const review = buildCareerReview();
     if (!review) return;
     setCareerReview(review);
-    setCareer(c => ({
-      ...c,
-      reputation: review.repAfter,
-      // Al ser despedido pierdes el trabajo hecho en el club: los PE no viajan
-      pe: review.fired ? 0 : capPE(c.pe + review.peGain, careerTeam, review.newTier),
-      tier: review.newTier,
-      fired: review.fired,
-      badStreak: review.badStreak,
-      offers: review.offers,
-      seasonLog: [],
-      clQualifiedFor: review.clQualified ? review.season + 1 : null,
-      lastProcessedSeason: review.season,
-      trophies: {
-        leagues: (c.trophies?.leagues || 0) + (review.position === 1 ? 1 : 0),
-        champions: (c.trophies?.champions || 0) + (review.clResult?.includes('Campeón') ? 1 : 0),
-        promotions: (c.trophies?.promotions || 0) + (c.div === 2 && review.position <= 3 ? 1 : 0)
-      },
-      seasonHistory: [
-        {
-          season: review.season, teamName: review.teamName, compName: review.compName,
-          div: c.div, pts: careerTeam?.pts || 0,
-          position: review.position, performance: review.performance,
-          repAfter: review.repAfter, note: review.note,
-          objectivesMet: review.objectivesMet, objectivesTotal: review.objectivesTotal,
-          clResult: review.clResult, promoted: c.div === 2 && review.position <= 3,
-          fired: review.fired
+    if (!alreadyProcessed) {
+      setCareer(c => ({
+        ...c,
+        reputation: review.repAfter,
+        // Al ser despedido pierdes el trabajo hecho en el club: los PE no viajan
+        pe: review.fired ? 0 : capPE(c.pe + review.peGain, careerTeam, review.newTier),
+        tier: review.newTier,
+        fired: review.fired,
+        badStreak: review.badStreak,
+        offers: review.offers,
+        seasonLog: [],
+        clQualifiedFor: review.clQualified ? review.season + 1 : null,
+        lastProcessedSeason: review.season,
+        trophies: {
+          leagues: (c.trophies?.leagues || 0) + (review.position === 1 ? 1 : 0),
+          champions: (c.trophies?.champions || 0) + (review.clResult?.includes('Campeón') ? 1 : 0),
+          promotions: (c.trophies?.promotions || 0) + (c.div === 2 && review.position <= 3 ? 1 : 0)
         },
-        ...(c.seasonHistory || [])
-      ]
-    }));
+        seasonHistory: [
+          {
+            season: review.season, teamName: review.teamName, compName: review.compName,
+            div: c.div, pts: careerTeam?.pts || 0,
+            position: review.position, performance: review.performance,
+            repAfter: review.repAfter, note: review.note,
+            objectivesMet: review.objectivesMet, objectivesTotal: review.objectivesTotal,
+            clResult: review.clResult, promoted: c.div === 2 && review.position <= 3,
+            fired: review.fired
+          },
+          ...(c.seasonHistory || [])
+        ]
+      }));
+    }
   };
 
   // Firmar por un club nuevo: contrato limpio, sin rastro del despido anterior.
@@ -4919,6 +4971,7 @@ function DiceFootballApp() {
       compId: offer.compId, div: offer.div, teamId: offer.teamId,
       tier: offer.tier, pe: 0, fired: false, offers: [], seasonLog: [],
       activeApplication: null,
+      pendingAppResolutionModal: null,
       transferredInSeason: season,
       reputation: clampRep(c.reputation + bonus),
       signingBonus: bonus,
@@ -5089,11 +5142,20 @@ function DiceFootballApp() {
         }
       }
 
-      // Caducidad de ofertas en el buzón: solo se quedan por 2 semanas y luego se limpia el buzón
-      const prunedOffers = (c.offers || []).map(o => {
-        const currentWeeks = typeof o.weeksRemaining === 'number' ? o.weeksRemaining : 2;
-        return { ...o, weeksRemaining: currentWeeks - 1 };
-      }).filter(o => o.weeksRemaining > 0);
+      // Caducidad de ofertas en el buzón:
+      // Las ofertas activas reducen sus semanas (2 -> 1 -> 0 [Expirada con alerta visual en buzón]).
+      // Las ofertas que ya estaban expiradas en la semana previa (weeksRemaining <= 0) se retiran definitivamente.
+      const prunedOffers = (c.offers || [])
+        .filter(o => (typeof o.weeksRemaining === 'number' ? o.weeksRemaining : 2) > 0)
+        .map(o => {
+          const currentWeeks = typeof o.weeksRemaining === 'number' ? o.weeksRemaining : 2;
+          const newWeeks = currentWeeks - 1;
+          return {
+            ...o,
+            weeksRemaining: newWeeks,
+            expired: newWeeks <= 0
+          };
+        });
 
       const finalOffers = newOffer
         ? [newOffer, ...prunedOffers.filter(o => o.id !== newOffer.id)]
@@ -5307,7 +5369,10 @@ function DiceFootballApp() {
           else if (phase === 'Semis') { nextPhase = 'Final'; newBracket.Final = [{ id: 'F1', hId: winners[0], aId: winners[1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null }]; } 
           else { nextPhase = 'Terminado'; showWinner = true; }
        }
-        const updatedComp = { history: [{ day: phase + (isChampions ? (isVuelta ? ' (Vuelta)' : ' (Ida)') : ''), results: allResults }, ...currentComp.history], matchday: currentComp.matchday + 1, phase: nextPhase, bracket: newBracket, showWinner };
+        const dayLabel = phase === 'Final'
+          ? 'Gran Final'
+          : (phase + (isChampions ? (isVuelta ? ' (Vuelta)' : ' (Ida)') : ''));
+        const updatedComp = { history: [{ day: dayLabel, results: allResults }, ...currentComp.history], matchday: currentComp.matchday + 1, phase: nextPhase, bracket: newBracket, showWinner };
         updateCompById(cId, updatedComp);
         if (showWinner) {
           const final = newBracket?.Final?.[0] || newBracket?.Final;
@@ -6750,7 +6815,12 @@ function DiceFootballApp() {
               {activeComp.bracket && (
                 <div className='space-y-6'>
                   <h2 className='text-xs font-black uppercase text-slate-200 border-b border-white/20 pb-2 drop-shadow-md'>Eliminatorias</h2>
-                  {['Octavos', 'Cuartos', 'Semis', 'Final'].map(phase => {
+                  {(() => {
+                    const po = ['Octavos', 'Cuartos', 'Semis', 'Final'];
+                    const curIdx = po.indexOf(activeComp.phase);
+                    if (curIdx === -1) return po; 
+                    return [...po.slice(curIdx, curIdx + 1), ...po.slice(curIdx + 1), ...po.slice(0, curIdx).reverse()];
+                  })().map(phase => {
                     const matches = activeComp.bracket[phase];
                     if (!matches || (Array.isArray(matches) && matches.length === 0)) return null;
                     const matchArray = Array.isArray(matches) ? matches : [matches];
@@ -7147,6 +7217,12 @@ function DiceFootballApp() {
                 onRejectOffer={(offerId) => setCareer(c => ({ ...c, offers: (c.offers || []).filter(o => o.id !== offerId) }))}
                 onSubmitApplication={submitCareerApplication}
                 onAdvanceOfficeWeek={advanceCareerOfficeWeek}
+                onRejectAppResolution={(offer) => setCareer(c => ({
+                  ...c,
+                  pendingAppResolutionModal: null,
+                  offers: (c.offers || []).filter(o => o.id !== offer?.id && o.teamId !== offer?.teamId)
+                }))}
+                onDecideLaterAppOffer={() => setCareer(c => ({ ...c, pendingAppResolutionModal: null }))}
                 onDismissAppResolutionModal={() => setCareer(c => ({ ...c, pendingAppResolutionModal: null }))}
                 onDismissSimulationFeedback={() => setCareer(c => ({ ...c, lastSimulationFeedback: null }))}
                 onDeleteCareer={handleDeleteCareerHard}
