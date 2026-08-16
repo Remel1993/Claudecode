@@ -760,9 +760,8 @@ const MIN_REP_FOR_TIER = { 1: 0, 2: 20, 3: 45, 4: 70 };
 /** Cuántas ofertas puede recibir el técnico según su situación y reputación. */
 export const offerCountFor = ({ kind, reputation = 0, objectivesMet = 0, score = 0 }) => {
   if (kind === 'fired') {
-    if (reputation < 15) return 0;             // despedido y sin nombre: paro
-    if (reputation < 35 || score <= -2) return 1;
-    return 2;
+    // Al ser despedido, SIEMPRE se garantizan equipos de rescate (entre 2 y 3 opciones)
+    return reputation >= 40 ? 3 : 2;
   }
   if (kind === 'renewal') return reputation >= 45 || objectivesMet >= 2 ? 3 : 2;
   // Interés por rendimiento durante/al final de una buena temporada
@@ -773,15 +772,15 @@ export const offerCountFor = ({ kind, reputation = 0, objectivesMet = 0, score =
 
 /**
  * Devuelve ofertas realistas: nunca un salto de más de un Tier, siempre con la
- * reputación suficiente y con castigo real tras un despido.
+ * reputación suficiente y con proyectos de rescate garantizados tras un despido.
  */
 export const buildOffers = ({
-  comps, career, performance, reputation, season, leagueNames,
+  comps, career = {}, performance, reputation, season, leagueNames,
   kind = 'performance', objectivesMet = 0, count = null
 }) => {
   if (!comps) return [];
   const score = performance?.score ?? 0;
-  const currentTier = career.tier || 1;
+  const currentTier = career?.tier || 1;
   const goodSeason = objectivesMet >= 2 && score >= 1;
 
   // Sin buen año no hay clubes llamando a media temporada
@@ -793,7 +792,7 @@ export const buildOffers = ({
   // Techo y suelo de nivel según lo ocurrido en la temporada
   let maxTier, minTier;
   if (kind === 'fired') {
-    maxTier = Math.max(1, currentTier - 1);
+    maxTier = Math.max(1, currentTier <= 1 ? 1 : currentTier - 1);
     minTier = 1;
   } else if (kind === 'renewal') {
     maxTier = goodSeason ? Math.min(4, currentTier + 1) : currentTier;
@@ -804,20 +803,30 @@ export const buildOffers = ({
   }
 
   const candidates = [];
-  Object.keys(LEAGUE_CLASS).forEach(compId => {
+  const allCompIds = Object.keys(comps || {});
+
+  allCompIds.forEach(compId => {
     const comp = comps[compId];
     if (!comp) return;
     [1, 2].forEach(div => {
       const teams = div === 2 ? comp.teams2 : comp.teams;
       (teams || []).forEach(team => {
+        // No ofrecer el mismo club del que acaba de ser cesado
         if (compId === career.compId && div === career.div && team.id === career.teamId) return;
         const tier = tierOf(team);
         const cls = classOf(compId);
         if (tier > (CLASS_INFO[cls]?.maxTier || 4)) return;
         if (tier > maxTier || tier < minTier) return;
-        // Filtro de reputación: duro y sin excepciones
-        if (reputation < (MIN_REP_FOR_CLASS[cls] || 0)) return;
-        if (reputation < (MIN_REP_FOR_TIER[tier] || 0)) return;
+
+        // Filtro de reputación: para despido (rescate), los clubes humildes (Tier 1-2) no exigen reputación alta
+        if (kind !== 'fired') {
+          if (reputation < (MIN_REP_FOR_CLASS[cls] || 0)) return;
+          if (reputation < (MIN_REP_FOR_TIER[tier] || 0)) return;
+        } else {
+          // Si es despido, solo se restringe si el club es de clase alta y el tier supera 2
+          if (tier > 2 && reputation < (MIN_REP_FOR_TIER[tier] || 20)) return;
+        }
+
         const appeal = score * 2 + reputation / 25 - (tier - currentTier) * 1.5;
         candidates.push({
           compId, compName: leagueNames?.[compId] || comp.name, div, team, tier, cls,
@@ -826,6 +835,29 @@ export const buildOffers = ({
       });
     });
   });
+
+  // Garantía de Rescate: si tras un despido hay pocos candidatos, buscar activamente equipos humildes (Segunda División o Tier 1-2)
+  if (kind === 'fired' && candidates.length < wanted) {
+    allCompIds.forEach(compId => {
+      const comp = comps[compId];
+      if (!comp) return;
+      [2, 1].forEach(div => {
+        const teams = div === 2 ? comp.teams2 : comp.teams;
+        (teams || []).forEach(team => {
+          if (compId === career.compId && div === career.div && team.id === career.teamId) return;
+          if (candidates.some(c => c.compId === compId && c.div === div && c.team.id === team.id)) return;
+          const tier = tierOf(team);
+          if (tier <= Math.max(1, currentTier)) {
+            candidates.push({
+              compId, compName: leagueNames?.[compId] || comp.name, div, team, tier,
+              cls: classOf(compId), appeal: 1, strength: strengthOf(team)
+            });
+          }
+        });
+      });
+    });
+  }
+
   if (!candidates.length) return [];
 
   // Reparto por niveles: como mucho UN club del Tier superior; el resto, de tu nivel
@@ -833,7 +865,7 @@ export const buildOffers = ({
   const same = candidates.filter(c => c.tier === currentTier).sort(() => Math.random() - 0.5);
   const lower = candidates.filter(c => c.tier < currentTier).sort((a, b) => b.strength - a.strength);
 
-  const pick = (arr) => (arr.length ? arr.splice(Math.floor(Math.random() * Math.min(arr.length, 5)), 1)[0] : null);
+  const pick = (arr) => (arr && arr.length ? arr.splice(Math.floor(Math.random() * Math.min(arr.length, 5)), 1)[0] : null);
   const chosen = [];
   if (goodSeason && kind !== 'fired' && stepUp.length) {
     const up = pick(stepUp);
@@ -841,14 +873,18 @@ export const buildOffers = ({
   }
   while (chosen.length < wanted) {
     const c = kind === 'fired'
-      ? (pick(lower) || pick(same))
-      : (pick(same) || pick(lower) || pick(stepUp));
+      ? (pick(lower) || pick(same) || pick(candidates))
+      : (pick(same) || pick(lower) || pick(stepUp) || pick(candidates));
     if (!c) break;
     if (!chosen.some(x => x.compId === c.compId && x.div === c.div && x.team.id === c.team.id)) chosen.push(c);
   }
 
   const reasonFor = (c) => {
-    if (kind === 'fired') return c.tier < currentTier ? 'Proyecto de reconstrucción para relanzarte' : 'Última oportunidad tras el despido';
+    if (kind === 'fired') {
+      return c.tier < currentTier
+        ? '🛟 Proyecto de Rescate: El club busca un cambio de rumbo urgente y te confía su banquillo para salvar la categoría y relanzar tu carrera.'
+        : '🛟 Oportunidad de Redención: La directiva apuesta por tu perfil para reconstruir el equipo y buscar la revancha deportiva tras tu salida.';
+    }
     if (kind === 'renewal') return c.tier > currentTier ? 'Salto de nivel al acabar contrato' : 'Oferta de mercado al acabar tu contrato';
     return c.tier > currentTier
       ? `${performance?.label || 'Gran temporada'}: te quieren para un proyecto mayor`
@@ -859,7 +895,7 @@ export const buildOffers = ({
     // Calcular posición y puntos actuales o finales del club candidato
     const comp = comps[c.compId];
     const teamsList = c.div === 2 ? comp?.teams2 : comp?.teams;
-    const sorted = [...(teamsList || [])].sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga));
+    const sorted = [...(teamsList || [])].sort((a, b) => (b.pts || 0) - (a.pts || 0) || ((b.gf || 0) - (b.ga || 0)) - ((a.gf || 0) - (a.ga || 0)));
     const clubIdx = sorted.findIndex(t => t.id === c.team.id);
     const clubPos = clubIdx >= 0 ? clubIdx + 1 : Math.ceil((sorted.length || 20) / 2);
     const clubPts = clubIdx >= 0 ? sorted[clubIdx].pts : (c.tier * 12);
@@ -867,7 +903,9 @@ export const buildOffers = ({
 
     // Estado competitivo
     let standingStatus = 'Media Tabla';
-    if (c.div === 1) {
+    if (kind === 'fired') {
+      standingStatus = '🛟 Proyecto de Rescate';
+    } else if (c.div === 1) {
       if (clubPos === 1) standingStatus = '🏆 Lucha por el Título';
       else if (clubPos <= 4) standingStatus = '⭐ Zona Champions';
       else if (clubPos <= 6) standingStatus = '🌍 Zona Europea';
@@ -878,10 +916,15 @@ export const buildOffers = ({
     }
 
     // Objetivo requerido por la directiva
-    let requiredObjective = 'Asegurar la permanencia y desarrollar la plantilla';
-    if (c.tier >= 4) requiredObjective = 'Conquistar el título de liga y pelear la Champions';
-    else if (c.tier === 3) requiredObjective = 'Clasificar a competiciones europeas (Top 4)';
-    else if (c.div === 2 || c.tier === 2) requiredObjective = 'Lograr el ascenso directo a 1ª División';
+    let requiredObjective = kind === 'fired'
+      ? 'Salvar la categoría, desarrollar la plantilla y revalorizar el club'
+      : 'Asegurar la permanencia y desarrollar la plantilla';
+
+    if (kind !== 'fired') {
+      if (c.tier >= 4) requiredObjective = 'Conquistar el título de liga y pelear la Champions';
+      else if (c.tier === 3) requiredObjective = 'Clasificar a competiciones europeas (Top 4)';
+      else if (c.div === 2 || c.tier === 2) requiredObjective = 'Lograr el ascenso directo a 1ª División';
+    }
 
     const contractObjectives = getContractObjectivesForTeam({
       team: c.team,
@@ -891,6 +934,8 @@ export const buildOffers = ({
       coachRep: reputation,
       totalRounds: (totalTeams - 1) * 2
     });
+
+    const isRescue = kind === 'fired';
 
     return {
       id: `${season}-${c.compId}-${c.div}-${c.team.id}`,
@@ -911,10 +956,13 @@ export const buildOffers = ({
       requiredObjective,
       contractObjectives,
       step: c.tier > currentTier ? 'up' : c.tier === currentTier ? 'same' : 'down',
-      profile: c.tier >= 4 ? 'Gigante Europeo' : c.tier >= 3 ? 'Club Dominante' : c.tier === 2 ? 'Media Tabla / Aspirante' : 'Proyecto Modesto',
+      profile: isRescue
+        ? (c.tier <= 1 ? '🛟 Club de Rescate' : '🛟 Salvación y Reconstrucción')
+        : (c.tier >= 4 ? 'Gigante Europeo' : c.tier >= 3 ? 'Club Dominante' : c.tier === 2 ? 'Media Tabla / Aspirante' : 'Proyecto Modesto'),
       seasons: CONTRACT_SEASONS,
       reason: reasonFor(c),
-      weeksRemaining: 2
+      weeksRemaining: 2,
+      isRescue
     };
   });
 };
@@ -1323,12 +1371,76 @@ export const careerSpells = (history = []) => {
   return spells.reverse();
 };
 
+/* ======================== MOTOR ESTANDARIZADO DE DADOS 1D6 ========================
+ * Mecánica pura 1D6:
+ * - Ocasión (ATT vs DEF): 1D6 ataque (<= ATT es tiro) y 1D6 defensa (> DEF es gol).
+ * - Penalti (ATT vs DEF): 1D6 ataque (<= ATT) y 1D6 portero (> DEF es gol).
+ */
+
+export const roll1D6 = (): number => Math.floor(Math.random() * 6) + 1;
+
+export const simOpportunity = (att: number = 1, def: number = 1): boolean => {
+  const attackRoll = roll1D6();
+  if (attackRoll > (att || 1)) return false;
+  const defenseRoll = roll1D6();
+  return defenseRoll > (def || 1);
+};
+
+export const simPenalty = (att: number = 1, def: number = 1): boolean => {
+  return (roll1D6() <= (att || 1)) && (roll1D6() > (def || 1));
+};
+
+export const simMatchGoals = (
+  oppH: number = 0,
+  attH: number = 1,
+  defA: number = 1,
+  oppA: number = 0,
+  attA: number = 1,
+  defH: number = 1
+): { sh: number; sa: number } => {
+  let sh = 0;
+  let sa = 0;
+  for (let i = 0; i < (oppH || 0); i++) {
+    if (simOpportunity(attH, defA)) sh++;
+  }
+  for (let i = 0; i < (oppA || 0); i++) {
+    if (simOpportunity(attA, defH)) sa++;
+  }
+  return { sh, sa };
+};
+
+export const simPenaltyShootout = (
+  attH: number = 1,
+  defA: number = 1,
+  attA: number = 1,
+  defH: number = 1
+): { scoreH: number; scoreA: number } => {
+  let spH = 0, spA = 0, shH = 0, shA = 0;
+  for (let i = 0; i < 5; i++) {
+    if (simPenalty(attH, defA)) spH++;
+    shH++;
+    if (spH > spA + (5 - shA) || spA > spH + (5 - shH)) break;
+    if (simPenalty(attA, defH)) spA++;
+    shA++;
+    if (spH > spA + (5 - shA) || spA > spH + (5 - shH)) break;
+  }
+  let suddenCount = 0;
+  while (spH === spA && suddenCount++ < 30) {
+    if (simPenalty(attH, defA)) spH++;
+    if (simPenalty(attA, defH)) spA++;
+  }
+  if (spH === spA) {
+    if (roll1D6() <= 3) spH++; else spA++;
+  }
+  return { scoreH: spH, scoreA: spA };
+};
+
 export const getSpecialOfficeWeeks = (totalLeagueMatchdays = 38) => {
   const totalRounds = Math.max(10, totalLeagueMatchdays || 38);
-  const midPoint = Math.floor(totalRounds / 2); // J17 en 34 (NL/Alemania), J19 en 38, J21 en 42
-  const break1 = Math.max(4, Math.round(totalRounds * 0.16)); // J5-J6
-  const break2 = Math.max(break1 + 4, Math.round(totalRounds * 0.35)); // J12-J13
-  const break3 = Math.max(midPoint + 4, Math.round(totalRounds * 0.72)); // J24 en 34, J27 en 38
+  const midPoint = Math.floor(totalRounds / 2); // Ecuador del torneo (ej: J17 en 34, J19 en 38, J21 en 42)
+  const break1 = Math.max(2, Math.min(midPoint - 4, Math.round(totalRounds * 0.16))); // J5-J6 en 38
+  const break2 = Math.max(break1 + 2, Math.min(midPoint - 1, Math.round(totalRounds * 0.35))); // J12-J13 en 38
+  const break3 = Math.max(midPoint + 2, Math.min(totalRounds - 2, Math.round(totalRounds * 0.72))); // J27 en 38, J24 en 34
 
   const w1 = 1;
   const wBreak1 = break1 + 2;
@@ -1423,27 +1535,43 @@ export const calculateCurrentSeasonWeek = (matchdaysPlayed = 0, completedOfficeW
 };
 
 export const getChampionsScheduledWeeks = (totalLeagueMatchdays = 38) => {
-  // En un calendario FIFA / PES estándar de ~44 semanas:
-  // - Fase de grupos: 6 jornadas repartidas en otoño (Semanas 4, 7, 10, 13, 16, 19)
-  // - Octavos Ida y Vuelta: Semanas 25 y 28 (febrero/marzo)
-  // - Cuartos Ida y Vuelta: Semanas 32 y 34 (abril)
-  // - Semifinales Ida y Vuelta: Semanas 37 y 39 (mayo)
-  // - Gran Final: Semana 43 (cierre de temporada)
-  return [
-    { clRoundIdx: 0, phaseKey: 'groups_1', label: 'Champions · Grupos J1', shortLabel: 'UCL J1', defaultWeek: 4 },
-    { clRoundIdx: 1, phaseKey: 'groups_2', label: 'Champions · Grupos J2', shortLabel: 'UCL J2', defaultWeek: 7 },
-    { clRoundIdx: 2, phaseKey: 'groups_3', label: 'Champions · Grupos J3', shortLabel: 'UCL J3', defaultWeek: 10 },
-    { clRoundIdx: 3, phaseKey: 'groups_4', label: 'Champions · Grupos J4', shortLabel: 'UCL J4', defaultWeek: 13 },
-    { clRoundIdx: 4, phaseKey: 'groups_5', label: 'Champions · Grupos J5', shortLabel: 'UCL J5', defaultWeek: 16 },
-    { clRoundIdx: 5, phaseKey: 'groups_6', label: 'Champions · Grupos J6', shortLabel: 'UCL J6', defaultWeek: 19 },
-    { clRoundIdx: 6, phaseKey: 'Octavos_leg1', label: 'Champions · Octavos (Ida)', shortLabel: 'UCL 1/8 Ida', defaultWeek: 25 },
-    { clRoundIdx: 7, phaseKey: 'Octavos_leg2', label: 'Champions · Octavos (Vuelta)', shortLabel: 'UCL 1/8 Vta', defaultWeek: 28 },
-    { clRoundIdx: 8, phaseKey: 'Cuartos_leg1', label: 'Champions · Cuartos (Ida)', shortLabel: 'UCL 1/4 Ida', defaultWeek: 32 },
-    { clRoundIdx: 9, phaseKey: 'Cuartos_leg2', label: 'Champions · Cuartos (Vuelta)', shortLabel: 'UCL 1/4 Vta', defaultWeek: 34 },
-    { clRoundIdx: 10, phaseKey: 'Semis_leg1', label: 'Champions · Semis (Ida)', shortLabel: 'UCL Semis Ida', defaultWeek: 37 },
-    { clRoundIdx: 11, phaseKey: 'Semis_leg2', label: 'Champions · Semis (Vuelta)', shortLabel: 'UCL Semis Vta', defaultWeek: 39 },
-    { clRoundIdx: 12, phaseKey: 'Final', label: 'Champions · Gran Final', shortLabel: 'UCL Final', defaultWeek: 43 }
+  const totalRounds = Math.max(10, totalLeagueMatchdays || 38);
+  const officeWeeks = getSpecialOfficeWeeks(totalRounds);
+  const totalWeeks = totalRounds + officeWeeks.length;
+
+  // Distribución armónica y proporcional de las 13 fechas de Champions (Grupos J1-J6, Octavos Ida/Vta, Cuartos Ida/Vta, Semis Ida/Vta, Final)
+  const targets = [
+    { clRoundIdx: 0, phaseKey: 'groups_1', label: 'Champions · Grupos J1', shortLabel: 'UCL J1', ratio: 0.09 },
+    { clRoundIdx: 1, phaseKey: 'groups_2', label: 'Champions · Grupos J2', shortLabel: 'UCL J2', ratio: 0.16 },
+    { clRoundIdx: 2, phaseKey: 'groups_3', label: 'Champions · Grupos J3', shortLabel: 'UCL J3', ratio: 0.23 },
+    { clRoundIdx: 3, phaseKey: 'groups_4', label: 'Champions · Grupos J4', shortLabel: 'UCL J4', ratio: 0.30 },
+    { clRoundIdx: 4, phaseKey: 'groups_5', label: 'Champions · Grupos J5', shortLabel: 'UCL J5', ratio: 0.37 },
+    { clRoundIdx: 5, phaseKey: 'groups_6', label: 'Champions · Grupos J6', shortLabel: 'UCL J6', ratio: 0.44 },
+    { clRoundIdx: 6, phaseKey: 'Octavos_leg1', label: 'Champions · Octavos (Ida)', shortLabel: 'UCL 1/8 Ida', ratio: 0.58 },
+    { clRoundIdx: 7, phaseKey: 'Octavos_leg2', label: 'Champions · Octavos (Vuelta)', shortLabel: 'UCL 1/8 Vta', ratio: 0.65 },
+    { clRoundIdx: 8, phaseKey: 'Cuartos_leg1', label: 'Champions · Cuartos (Ida)', shortLabel: 'UCL 1/4 Ida', ratio: 0.74 },
+    { clRoundIdx: 9, phaseKey: 'Cuartos_leg2', label: 'Champions · Cuartos (Vuelta)', shortLabel: 'UCL 1/4 Vta', ratio: 0.79 },
+    { clRoundIdx: 10, phaseKey: 'Semis_leg1', label: 'Champions · Semis (Ida)', shortLabel: 'UCL Semis Ida', ratio: 0.86 },
+    { clRoundIdx: 11, phaseKey: 'Semis_leg2', label: 'Champions · Semis (Vuelta)', shortLabel: 'UCL Semis Vta', ratio: 0.91 },
+    { clRoundIdx: 12, phaseKey: 'Final', label: 'Champions · Gran Final', shortLabel: 'UCL Final', ratio: 0.98 }
   ];
+
+  let lastAssigned = 1;
+  return targets.map((t, idx) => {
+    let ideal = Math.round(t.ratio * totalWeeks);
+    if (idx === targets.length - 1) {
+      ideal = totalWeeks;
+    }
+    let assigned = Math.max(lastAssigned + 1, Math.min(totalWeeks, ideal));
+    lastAssigned = assigned;
+    return {
+      clRoundIdx: t.clRoundIdx,
+      phaseKey: t.phaseKey,
+      label: t.label,
+      shortLabel: t.shortLabel,
+      defaultWeek: assigned
+    };
+  });
 };
 
 export const DEFAULT_CAREER = {

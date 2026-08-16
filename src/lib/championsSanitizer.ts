@@ -2,6 +2,8 @@
  * Utilidades para sanitización y cálculo de llaves de Champions League (formato clásico: ida y vuelta en Octavos/Cuartos/Semis, partido único en Final).
  */
 
+import { simMatchGoals } from './career';
+
 export interface ChampionsBracketMatch {
   id: string;
   hId: number | null;
@@ -69,9 +71,7 @@ export const sanitizeChampionsBracket = (
         const h = teams.find((t: any) => t.id === m.hId);
         const a = teams.find((t: any) => t.id === m.aId);
 
-        let simH = 0, simA = 0;
-        for (let i = 0; i < (a?.opp || 2); i++) if (Math.floor(Math.random() * 6) + 1 <= (a?.att || 2) && Math.floor(Math.random() * 6) + 1 > (h?.def || 2)) simH++;
-        for (let i = 0; i < (h?.opp || 2); i++) if (Math.floor(Math.random() * 6) + 1 <= (h?.att || 2) && Math.floor(Math.random() * 6) + 1 > (a?.def || 2)) simA++;
+        const { sh: simH, sa: simA } = simMatchGoals(a?.opp || 2, a?.att || 2, h?.def || 2, h?.opp || 2, h?.att || 2, a?.def || 2);
 
         // En la vuelta, m.aId es local (simH) y m.hId es visitante (simA)
         let sh2 = simA; // Goles de m.hId en la vuelta
