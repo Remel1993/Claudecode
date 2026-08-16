@@ -356,6 +356,7 @@ const ConfirmSignModal = ({ title, teamName, detail, note, contractObjectives = 
 export const CareerView = ({
   career, team, comp, standings, position, seasonState, nextFixture, rival, isHome,
   divisionFinished, pendingGlobal, worldPending, onBack, onPlayMatch, onSimulateWorld,
+  onSimulateGlobalMatchday, onSimulateAllRemainingLeagues,
   onSetTactic, onSpendPE, onOpenReview, onSimulateMatch, clInfo, onOpenChampions,
   onRenameManager, reviewDone, contractSigned, allLeaguesFinished, championsFinished, onNewSeason,
   onApplyTrainingStats, onApplyDrillResult, onAcceptOffer, onRejectOffer, onSubmitApplication,
@@ -927,6 +928,21 @@ export const CareerView = ({
   const totalRounds = Math.max(0, ((standings?.length || 20) - 1) * 2);
   const compHistory = (career.div === 2 ? comp?.history2 : comp?.history) || [];
 
+  const maxLeagueRounds = useMemo(() => {
+    if (!allComps) return 38;
+    const rounds = Object.values(allComps)
+      .filter((c: any) => c && c.type === 'league')
+      .map((c: any) => {
+        const r1 = Array.isArray(c.teams) && c.teams.length >= 2 ? (c.teams.length - 1) * 2 : 0;
+        const r2 = Array.isArray(c.teams2) && c.teams2.length >= 2 ? (c.teams2.length - 1) * 2 : 0;
+        return Math.max(r1, r2);
+      });
+    return rounds.length > 0 ? Math.max(...rounds) : 38;
+  }, [allComps]);
+
+  const currentGlobalMd = seasonState?.globalMatchday || 1;
+  const remainingGlobalMatchdays = Math.max(0, maxLeagueRounds - currentGlobalMd + 1);
+
   return (
     <div className='flex-grow flex flex-col px-4 pb-8'>
       <header className='flex items-center gap-3 py-5'>
@@ -1084,31 +1100,37 @@ export const CareerView = ({
 
       {/* AVISO DE FIN DE ETAPA / DESPIDO */}
       {career.fired && (
-        <div className='bg-red-950/80 border border-red-500/50 rounded-2xl p-4 mb-4 shadow-xl'>
+        <div className='bg-gradient-to-r from-red-950/90 via-slate-900 to-amber-950/80 border border-red-500/50 rounded-2xl p-4 mb-4 shadow-xl'>
           <div className='flex items-center gap-3'>
             <div className='w-10 h-10 rounded-xl bg-red-500/20 text-red-400 flex items-center justify-center shrink-0 border border-red-500/40'>
               <AlertTriangle size={20} />
             </div>
             <div className='flex-grow min-w-0'>
-              <p className='text-[9px] font-black uppercase tracking-wider text-red-400'>Etapa Finalizada</p>
-              <p className='text-xs font-bold text-white'>Has sido despedido de {team?.name}.</p>
+              <p className='text-[9px] font-black uppercase tracking-wider text-red-400'>Etapa Finalizada · En Busca de Club</p>
+              <p className='text-xs font-bold text-white'>Has sido cesado de {team?.name}.</p>
               <p className='text-[9px] font-bold text-slate-300 mt-0.5'>
-                Puedes revisar la tabla final, tu vitrina histórica o abrir tus ofertas para firmar por tu próximo proyecto.
+                Tienes <strong className='text-amber-300'>{(career.offers || []).length} ofertas de rescate</strong> esperándote en tu buzón para continuar tu carrera en un nuevo banquillo.
               </p>
             </div>
           </div>
           <div className='flex items-center gap-2 mt-3 pt-3 border-t border-white/10'>
             <button
-              onClick={onOpenReview}
+              onClick={() => setTab('market')}
               className='flex-1 bg-gradient-to-r from-amber-500 to-yellow-600 text-slate-950 py-2.5 rounded-xl text-[9px] font-black uppercase italic tracking-wider active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow-md'
             >
-              <FileSignature size={13} /> Ver Balance y Ofertas
+              <Sparkles size={13} /> Ofertas de Rescate ({(career.offers || []).length})
+            </button>
+            <button
+              onClick={onOpenReview}
+              className='flex-1 bg-slate-800 hover:bg-slate-700 text-white py-2.5 rounded-xl text-[9px] font-black uppercase tracking-wider border border-white/10 active:scale-95 transition-all flex items-center justify-center gap-1.5'
+            >
+              <FileSignature size={13} /> Ver Balance
             </button>
             <button
               onClick={() => setTab('legend')}
               className='px-3 bg-white/10 hover:bg-white/15 text-white py-2.5 rounded-xl text-[9px] font-black uppercase tracking-wider active:scale-95 transition-all flex items-center gap-1'
             >
-              <Award size={13} /> Mi Historial
+              <Award size={13} /> Historial
             </button>
           </div>
         </div>
@@ -1268,21 +1290,64 @@ export const CareerView = ({
               )}
 
               {divisionFinished ? (
-                <Panel className='p-5 text-center relative overflow-hidden space-y-3'>
+                <Panel className='p-5 text-center relative overflow-hidden space-y-4'>
                   <div className='absolute -top-12 left-1/2 -translate-x-1/2 w-40 h-40 bg-amber-500/10 rounded-full blur-3xl pointer-events-none' />
                   <Trophy size={32} className='text-yellow-400 mx-auto animate-bounce' />
-                  <h3 className='text-sm font-black uppercase italic text-white'>
-                    {career.fired ? 'Has sido cesado del club' : 'Temporada de tu club finalizada'}
-                  </h3>
-                  <p className='text-[10px] font-bold text-slate-300'>
-                    {career.fired
-                      ? 'La directiva ha rescindido tu contrato. Revisa tu Buzón de ofertas o el Balance Completo para firmar con tu próximo equipo.'
-                      : contractSigned
-                        ? 'Contrato firmado: el balance de esta temporada está cerrado.'
-                        : reviewDone
-                          ? 'El balance de esta temporada ya está resuelto.'
-                          : 'Dirígete a tu Buzón para revisar ofertas o abre el Balance Completo.'}
-                  </p>
+                  <div>
+                    <h3 className='text-sm font-black uppercase italic text-white'>
+                      {career.fired ? 'Has sido cesado del club' : 'Temporada de tu club finalizada'}
+                    </h3>
+                    <p className='text-[10px] font-bold text-slate-300 mt-1'>
+                      {career.fired
+                        ? 'La directiva ha rescindido tu contrato. Revisa tu Buzón de ofertas o el Balance Completo para firmar con tu próximo equipo.'
+                        : contractSigned
+                          ? 'Contrato firmado: el balance de esta temporada está cerrado.'
+                          : reviewDone
+                            ? 'El balance de esta temporada ya está resuelto.'
+                            : 'Dirígete a tu Buzón para revisar ofertas o abre el Balance Completo.'}
+                    </p>
+                  </div>
+
+                  {/* Panel de sincronización de Temporada Global si otras ligas europeas aún tienen jornadas pendientes */}
+                  {!allLeaguesFinished && (
+                    <div className='p-4 bg-slate-950/60 rounded-2xl border border-amber-500/30 space-y-3 text-left shadow-inner'>
+                      <div className='flex items-center justify-between'>
+                        <div className='flex items-center gap-2'>
+                          <div className='w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shrink-0'>
+                            <Globe size={16} />
+                          </div>
+                          <div>
+                            <p className='text-[9px] font-black uppercase tracking-widest text-emerald-400'>
+                              Temporada Global · Jornada {currentGlobalMd} de {maxLeagueRounds}
+                            </p>
+                            <p className='text-[10px] font-bold text-slate-200'>
+                              Otras ligas europeas continúan en juego
+                            </p>
+                          </div>
+                        </div>
+                        <span className='px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[8px] font-black uppercase tracking-wider shrink-0'>
+                          {remainingGlobalMatchdays} J. restantes
+                        </span>
+                      </div>
+                      <p className='text-[9px] font-bold text-slate-300 leading-snug'>
+                        Tu liga ha completado sus {totalRoundsCount} jornadas. Puedes simular el resto de ligas europeas jornada a jornada o completarlas todas de golpe para definir clasificaciones, ascensos y clasificados a Champions.
+                      </p>
+                      <div className='grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1'>
+                        <button
+                          onClick={onSimulateGlobalMatchday || onSimulateWorld}
+                          className='w-full bg-amber-500/90 hover:bg-amber-400 text-slate-950 py-3 rounded-xl text-[9px] font-black uppercase italic tracking-widest active:scale-95 transition-all shadow-md flex items-center justify-center gap-1.5'
+                        >
+                          <Dices size={14} /> Simular Jornada Global {currentGlobalMd}
+                        </button>
+                        <button
+                          onClick={onSimulateAllRemainingLeagues}
+                          className='w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white py-3 rounded-xl text-[9px] font-black uppercase italic tracking-widest active:scale-95 transition-all shadow-md flex items-center justify-center gap-1.5 border border-blue-400/30'
+                        >
+                          <FastForward size={14} /> Simular Resto de Ligas ({remainingGlobalMatchdays} J)
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   <div className='space-y-2 pt-1'>
                     {/* Botón directo de Champions League cuando el equipo está clasificado o en disputa */}
@@ -2564,8 +2629,12 @@ export const CareerView = ({
               <Panel className='p-5 space-y-4'>
                 <div className='flex items-center justify-between gap-2 flex-wrap'>
                   <div>
-                    <p className='text-[9px] font-black uppercase tracking-widest text-amber-400'>Buzón del Técnico</p>
-                    <h3 className='text-base font-black uppercase italic text-white mt-0.5'>Propuestas de Contrato</h3>
+                    <p className='text-[9px] font-black uppercase tracking-widest text-amber-400'>
+                      {career.fired ? 'Buzón del Técnico · Redención' : 'Buzón del Técnico'}
+                    </p>
+                    <h3 className='text-base font-black uppercase italic text-white mt-0.5'>
+                      {career.fired ? '🛟 Ofertas de Rescate y Nuevo Proyecto' : 'Propuestas de Contrato'}
+                    </h3>
                   </div>
                   <div className='flex items-center gap-2'>
                     <div className='hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[8.5px] font-bold'>
@@ -3051,7 +3120,7 @@ export const CareerSeasonReviewModal = ({ review, onAcceptOffer, onRenew, onStay
   if (!review) return null;
 
   const marketTitle = review.fired
-    ? 'Nuevos proyectos para tu perfil'
+    ? '🛟 Banquillos de Rescate Disponibles'
     : review.contractEnd
       ? 'Fin de contrato: renovar o cambiar de aires'
       : 'Mercado de entrenadores';
@@ -3103,7 +3172,11 @@ export const CareerSeasonReviewModal = ({ review, onAcceptOffer, onRenew, onStay
             {review.clQualified && <p className='text-[10px] font-black uppercase italic text-blue-400 mt-2'>Clasificado a la Champions global</p>}
             {review.promote && <p className='text-[10px] font-black uppercase italic text-emerald-400 mt-2'>Ascenso a Tier {review.newTier}</p>}
             {review.fired && <p className='text-[10px] font-black uppercase italic text-red-400 mt-2 flex items-center gap-1'><AlertTriangle size={12} /> Has sido despedido</p>}
-            {review.fired && <p className='text-[10px] font-bold text-slate-300 mt-1'>Pierdes los PE del club y tu nombre se resiente en el mercado.</p>}
+            {review.fired && (
+              <p className='text-[10px] font-bold text-slate-300 mt-1'>
+                Pierdes los PE del club anterior, pero clubes modestos te ofrecen un proyecto de rescate para relanzar tu carrera.
+              </p>
+            )}
             {review.unemployed && <p className='text-[10px] font-black uppercase italic text-red-300 mt-2'>Ningún club te ofrece banquillo: te quedas sin equipo.</p>}
             {!review.fired && review.contractEnd && (
               <p className='text-[10px] font-black uppercase italic text-amber-300 mt-2 flex items-center gap-1'>
@@ -3120,13 +3193,31 @@ export const CareerSeasonReviewModal = ({ review, onAcceptOffer, onRenew, onStay
 
           {review.offers?.length > 0 && (
             <div>
-              <p className='text-[9px] font-black uppercase tracking-widest text-amber-400 mb-2'>{marketTitle}</p>
+              <div className='flex items-center justify-between mb-2'>
+                <p className='text-[9px] font-black uppercase tracking-widest text-amber-400'>{marketTitle}</p>
+                {review.fired && (
+                  <span className='text-[8px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20'>
+                    {review.offers.length} proyectos listos
+                  </span>
+                )}
+              </div>
               <div className='space-y-2'>
                 {review.offers.map(o => (
-                  <button key={o.id} onClick={() => setPendingOffer(o)} className='w-full flex items-center gap-3 bg-black/40 hover:bg-amber-600/20 rounded-2xl p-3 border border-white/10 text-left active:scale-95 transition-all'>
+                  <button
+                    key={o.id}
+                    onClick={() => setPendingOffer(o)}
+                    className='w-full flex items-center gap-3 bg-black/40 hover:bg-amber-600/20 rounded-2xl p-3 border border-white/10 text-left active:scale-95 transition-all'
+                  >
                     <Shield color1={o.color1} color2={o.color2} initial={o.teamName} size='sm' isFlag={o.isFlag} />
                     <div className='flex-grow min-w-0'>
-                      <p className='text-[10px] font-black uppercase italic text-white truncate'>{o.teamName}</p>
+                      <div className='flex items-center gap-1.5'>
+                        <p className='text-[10px] font-black uppercase italic text-white truncate'>{o.teamName}</p>
+                        {o.isRescue && (
+                          <span className='text-[7.5px] font-black uppercase px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30'>
+                            Rescate
+                          </span>
+                        )}
+                      </div>
                       <p className='text-[8px] font-bold uppercase text-slate-300 truncate'>
                         {o.compName} · {o.div === 2 ? '2ª' : '1ª'} · Tier {o.tier} {o.standingStatus ? `· ${o.standingStatus}` : ''}
                       </p>
@@ -3135,7 +3226,11 @@ export const CareerSeasonReviewModal = ({ review, onAcceptOffer, onRenew, onStay
                   </button>
                 ))}
               </div>
-              <p className='text-[8px] font-bold uppercase text-slate-400 tracking-wider mt-2'>Se te pedirá confirmación antes de firmar.</p>
+              <p className='text-[8px] font-bold uppercase text-slate-400 tracking-wider mt-2'>
+                {review.fired
+                  ? 'Toca cualquier club de rescate para firmar tu nuevo contrato y continuar la carrera.'
+                  : 'Se te pedirá confirmación antes de firmar.'}
+              </p>
             </div>
           )}
 

@@ -1,6 +1,7 @@
 // @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { roll1D6 } from '../lib/career';
 import {
   Dumbbell, Dices, HeartPulse, AlertTriangle, ShieldCheck, Check,
   X, Zap, Sparkles, Award, ArrowRight, ShieldAlert, Activity, RotateCcw,
@@ -78,11 +79,11 @@ export const TrainingDrillModal: React.FC<TrainingDrillModalProps> = ({
     let rollCount = 0;
     const maxRolls = 14;
     const interval = setInterval(() => {
-      setDiceValue(Math.floor(Math.random() * 6) + 1);
+      setDiceValue(roll1D6());
       rollCount++;
       if (rollCount >= maxRolls) {
         clearInterval(interval);
-        const finalVal = Math.floor(Math.random() * 6) + 1;
+        const finalVal = roll1D6();
         setDiceValue(finalVal);
         setRolling(false);
         processDrillOutcome(finalVal);
