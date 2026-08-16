@@ -803,14 +803,17 @@ export const buildOffers = ({
   }
 
   const candidates = [];
-  const allCompIds = Object.keys(comps || {});
+  // Solo ligas de clubes (L1 a L7), excluyendo competiciones de copa o selecciones como Copa del Mundo
+  const allCompIds = Object.keys(comps || {}).filter(id => id.startsWith('L') && comps[id]?.type === 'league' && id !== 'C2' && id !== 'WC');
 
   allCompIds.forEach(compId => {
     const comp = comps[compId];
-    if (!comp) return;
+    if (!comp || comp.type !== 'league' || compId === 'C2' || compId === 'WC') return;
     [1, 2].forEach(div => {
       const teams = div === 2 ? comp.teams2 : comp.teams;
       (teams || []).forEach(team => {
+        // Excluir selecciones nacionales, países o equipos con bandera o región
+        if (!team || team.isFlag || team.region || (team as any).wcOrigin) return;
         // No ofrecer el mismo club del que acaba de ser cesado
         if (compId === career.compId && div === career.div && team.id === career.teamId) return;
         const tier = tierOf(team);
@@ -840,10 +843,11 @@ export const buildOffers = ({
   if (kind === 'fired' && candidates.length < wanted) {
     allCompIds.forEach(compId => {
       const comp = comps[compId];
-      if (!comp) return;
+      if (!comp || comp.type !== 'league' || compId === 'C2' || compId === 'WC') return;
       [2, 1].forEach(div => {
         const teams = div === 2 ? comp.teams2 : comp.teams;
         (teams || []).forEach(team => {
+          if (!team || team.isFlag || team.region || (team as any).wcOrigin) return;
           if (compId === career.compId && div === career.div && team.id === career.teamId) return;
           if (candidates.some(c => c.compId === compId && c.div === div && c.team.id === team.id)) return;
           const tier = tierOf(team);
@@ -1085,13 +1089,13 @@ export const evaluateApplication = ({
 /* ================== VACANTES DE MERCADO PARA POSTULACIÓN =================== */
 export const getMarketVacancies = (comps = {}, career = {}, currentPosition = 9) => {
   const candidates = [];
-  const compIds = Object.keys(comps || {});
+  const compIds = Object.keys(comps || {}).filter(id => id.startsWith('L') && comps[id]?.type === 'league' && id !== 'C2' && id !== 'WC');
   const currentTier = career.tier || 1;
   const currentPos = currentPosition || 9;
 
   compIds.forEach(compId => {
     const comp = comps[compId];
-    if (!comp) return;
+    if (!comp || comp.type !== 'league' || compId === 'C2' || compId === 'WC') return;
 
     [1, 2].forEach(div => {
       const teams = div === 2 ? comp.teams2 : comp.teams;
@@ -1101,6 +1105,7 @@ export const getMarketVacancies = (comps = {}, career = {}, currentPosition = 9)
       const total = sorted.length;
 
       sorted.forEach((team, idx) => {
+        if (!team || team.isFlag || team.region || (team as any).wcOrigin) return;
         if (compId === career.compId && div === career.div && team.id === career.teamId) return;
         const tier = tierOf(team);
 
@@ -1232,13 +1237,13 @@ export const getRejectionReason = ({ requiredRep = 40, coachRep = 20, badStreak 
 /* ======================= GENERADOR DINÁMICO DE RUMORES ======================= */
 export const generateRumors = (comps = {}, career = {}) => {
   const rumors = [];
-  const compIds = Object.keys(comps || {});
+  const compIds = Object.keys(comps || {}).filter(id => id.startsWith('L') && comps[id]?.type === 'league' && id !== 'C2' && id !== 'WC');
   const seenTeamIds = new Set();
   const seenIds = new Set();
 
   compIds.forEach(compId => {
     const comp = comps[compId];
-    if (!comp) return;
+    if (!comp || comp.type !== 'league' || compId === 'C2' || compId === 'WC') return;
 
     [1, 2].forEach(div => {
       const teams = div === 2 ? comp.teams2 : comp.teams;
@@ -1249,7 +1254,7 @@ export const generateRumors = (comps = {}, career = {}) => {
 
       // 1. Estatus de Técnico en Peligro (Tier 1/2/3 con derrotas o en zona de descenso)
       sorted.forEach((t, idx) => {
-        if (!t || t.id === career?.teamId) return;
+        if (!t || t.isFlag || t.region || (t as any).wcOrigin || t.id === career?.teamId) return;
         if (seenTeamIds.has(t.id)) return;
         const tier = tierOf(t);
         const inRelegation = idx >= total - 3;
@@ -1340,6 +1345,7 @@ export const fireChance = ({ objective, score = 0, objectivesMet = 0, badStreak 
 // Los 5 equipos con estadísticas más mediocres de una división
 export const worstTeams = (teams, count = 5) => {
   return [...(teams || [])]
+    .filter(t => t && !t.isFlag && !t.region && !(t as any).wcOrigin)
     .sort((a, b) => strengthOf(a) - strengthOf(b) || (a.name || '').localeCompare(b.name || ''))
     .slice(0, count);
 };
