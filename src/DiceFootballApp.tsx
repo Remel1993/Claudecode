@@ -23,7 +23,8 @@ import {
   peForResult, repForMatch, clampRep, objectiveFor, expectedPosition, readPerformance, buildOffers,
   CONTRACT_SEASONS, CL_SPOTS, isSquadMaxed, clPhaseLabel, clProgressRep, fireChance, seasonObjectives,
   remainingUpgradeCost, capPE, signingRepBonus, evaluateApplication, getMarketVacancies,
-  SPECIAL_OFFICE_WEEKS, calculateCurrentSeasonWeek, getChampionsMatchKey
+  SPECIAL_OFFICE_WEEKS, calculateCurrentSeasonWeek, getChampionsMatchKey,
+  roll1D6, simOpportunity, simPenalty, simMatchGoals, simPenaltyShootout
 } from '@/lib/career';
 import { sanitizeChampionsBracket } from '@/lib/championsSanitizer';
 
@@ -2800,6 +2801,7 @@ function DiceFootballApp() {
       if (match) aggregate = { sh: match.sa, sa: match.sh };
     }
 
+    setMatchState(null);
     setMatchState({
       home, away, scoreH: 0, scoreA: 0, oppH: home.opp, oppA: away.opp, turn: 'H', phase: 'att', isDiv2Context,
       logs: ['⚽ ¡Comienza el encuentro!', aggregate ? `📊 Global: ${aggregate.sh} - ${aggregate.sa}` : 'Al terreno de juego.'],
@@ -2814,12 +2816,12 @@ function DiceFootballApp() {
     setRolling(true);
     if (rollIntervalRef.current) { clearInterval(rollIntervalRef.current); rollIntervalRef.current = null; }
     if (rollTimeoutRef.current) { clearTimeout(rollTimeoutRef.current); rollTimeoutRef.current = null; }
-    rollIntervalRef.current = setInterval(() => setMatchState(prev => prev ? { ...prev, lastDie: Math.floor(Math.random() * 6) + 1 } : prev), 100);
+    rollIntervalRef.current = setInterval(() => setMatchState(prev => prev ? { ...prev, lastDie: roll1D6() } : prev), 100);
 
     rollTimeoutRef.current = setTimeout(() => {
       if (rollIntervalRef.current) { clearInterval(rollIntervalRef.current); rollIntervalRef.current = null; }
       rollTimeoutRef.current = null;
-      const die = Math.floor(Math.random() * 6) + 1;
+      const die = roll1D6();
       setMatchState(prev => {
         if (!prev) return prev;
         if (prev.phase === 'penalties') {
@@ -2888,14 +2890,27 @@ function DiceFootballApp() {
     if (nextTurn === 'A' && nextOppA <= 0) nextTurn = 'H';
 
     if (nextOppH <= 0 && nextOppA <= 0) {
-      const isChampions = activeCompId === 'C1';
-      const isIda = isChampions && activeComp.matchday % 2 === 0 && activeComp.phase !== 'Final' && activeComp.phase !== 'groups';
-      const isVuelta = isChampions && activeComp.matchday % 2 !== 0 && activeComp.phase !== 'Final' && activeComp.phase !== 'groups';
-      let needsPenalties = state.isKnockout && state.scoreH === state.scoreA && !isIda && !isVuelta;
-      if (isVuelta && state.aggregate) if (state.aggregate.sh + state.scoreH === state.aggregate.sa + state.scoreA) needsPenalties = true;
+      const isChampions = activeCompId === 'C1' || !!state.isChampions;
+      const comp = (activeCompId ? comps[activeCompId] : null) || (isChampions ? comps['C1'] : null);
+      const phase = state.championsPhase || comp?.phase;
+      const isIda = isChampions && phase !== 'Final' && phase !== 'groups' && (state.isVuelta === false || (comp && (comp.matchday || 0) % 2 === 0));
+      const isVuelta = isChampions && phase !== 'Final' && phase !== 'groups' && (state.isVuelta === true || (comp && (comp.matchday || 0) % 2 !== 0));
 
-      if (needsPenalties) return { ...state, oppH: 0, oppA: 0, phase: 'penalties', penalties: { scoreH: 0, scoreA: 0, turn: 'H', shotsH: 0, shotsA: 0, phase: 'att', finished: false, historyH: [], historyA: [] }, logs: ['⚖️ Empate. ¡Penaltis!', ...state.logs] };
-      return { ...state, oppH: 0, oppA: 0, finished: true, logs: ['🏁 Final.', ...state.logs] };
+      let needsPenalties = false;
+      if (state.isKnockout) {
+        if (isVuelta) {
+          if (state.aggregate) {
+            needsPenalties = (state.aggregate.sh + state.scoreH === state.aggregate.sa + state.scoreA);
+          } else {
+            needsPenalties = (state.scoreH === state.scoreA);
+          }
+        } else if (!isIda) {
+          needsPenalties = (state.scoreH === state.scoreA);
+        }
+      }
+
+      if (needsPenalties) return { ...state, oppH: 0, oppA: 0, phase: 'penalties', penalties: { scoreH: 0, scoreA: 0, turn: 'H', shotsH: 0, shotsA: 0, phase: 'att', finished: false, historyH: [], historyA: [] }, logs: ['⚖️ Empate en el global. ¡Tanda de Penaltis!', ...state.logs] };
+      return { ...state, oppH: 0, oppA: 0, finished: true, logs: ['🏁 Final del partido.', ...state.logs] };
     }
     return { ...state, oppH: nextOppH, oppA: nextOppA, turn: nextTurn, phase: 'att' };
   };
@@ -2928,9 +2943,7 @@ function DiceFootballApp() {
           a = { ...a, att: dist.att, opp: dist.opp, def: dist.def };
         }
       }
-      let sh = 0, sa = 0;
-      for(let i=0; i<(h?.opp||0); i++) if(Math.floor(Math.random()*6)+1 <= (h?.att||0) && Math.floor(Math.random()*6)+1 > (a?.def||0)) sh++;
-      for(let i=0; i<(a?.opp||0); i++) if(Math.floor(Math.random()*6)+1 <= (a?.att||0) && Math.floor(Math.random()*6)+1 > (h?.def||0)) sa++;
+      const { sh, sa } = simMatchGoals(h?.opp, h?.att, a?.def, a?.opp, a?.att, h?.def);
       return { hId: m.homeId, aId: m.awayId, sh, sa };
     });
     const updatedTeams = teams.map((t: any) => {
@@ -3224,6 +3237,29 @@ function DiceFootballApp() {
     }
   }, [career.active, career.teamId, career.compId, career.div, careerMd, careerTeam]);
 
+  // Garantizar ofertas de rescate activas si el mánager está despedido y no tiene ofertas en su buzón
+  useEffect(() => {
+    if (career.active && career.fired && (!career.offers || career.offers.length === 0) && comps) {
+      const leagueNames = Object.fromEntries(LEAGUE_IDS.map(id => [id, comps[id]?.name]));
+      const rescueOffers = buildOffers({
+        comps,
+        career,
+        performance: { score: -2, label: 'En busca de proyecto' },
+        reputation: career.reputation || 10,
+        season: seasonState?.season || 1,
+        leagueNames,
+        kind: 'fired',
+        objectivesMet: 0
+      });
+      if (rescueOffers.length > 0) {
+        setCareer(c => ({
+          ...c,
+          offers: rescueOffers
+        }));
+      }
+    }
+  }, [career.active, career.fired, career.offers?.length, comps, seasonState?.season]);
+
   const openCareer = () => {
     if (career.active && careerTeam) setView('career');
     else setView('careerSelect');
@@ -3461,6 +3497,7 @@ function DiceFootballApp() {
 
     const home = careerIsHome ? { ...careerTeam, att: dist.att, opp: dist.opp, def: dist.def } : careerRival;
     const away = careerIsHome ? careerRival : { ...careerTeam, att: dist.att, opp: dist.opp, def: dist.def };
+    setMatchState(null);
     setMatchState({
       home, away, scoreH: 0, scoreA: 0, oppH: home.opp, oppA: away.opp, turn: 'H', phase: 'att',
       isDiv2Context: career.div === 2,
@@ -3510,9 +3547,7 @@ function DiceFootballApp() {
         }
         const h = teams.find(t => t.id === m.homeId);
         const a = teams.find(t => t.id === m.awayId);
-        let sh = 0, sa = 0;
-        for (let i = 0; i < (h?.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (h?.att || 0) && Math.floor(Math.random() * 6) + 1 > (a?.def || 0)) sh++;
-        for (let i = 0; i < (a?.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (a?.att || 0) && Math.floor(Math.random() * 6) + 1 > (h?.def || 0)) sa++;
+        const { sh, sa } = simMatchGoals(h?.opp, h?.att, a?.def, a?.opp, a?.att, h?.def);
         return { hId: m.homeId, aId: m.awayId, sh, sa };
       });
       const updatedTeams = teams.map(t => {
@@ -3797,9 +3832,7 @@ function DiceFootballApp() {
     const mine = { ...careerTeam, att: finalStats.att, opp: finalStats.opp, def: finalStats.def };
     const home = careerIsHome ? mine : careerRival;
     const away = careerIsHome ? careerRival : mine;
-    let sh = 0, sa = 0;
-    for (let i = 0; i < (home.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (home.att || 0) && Math.floor(Math.random() * 6) + 1 > (away.def || 0)) sh++;
-    for (let i = 0; i < (away.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (away.att || 0) && Math.floor(Math.random() * 6) + 1 > (home.def || 0)) sa++;
+    const { sh, sa } = simMatchGoals(home.opp, home.att, away.def, away.opp, away.att, home.def);
 
     applyCareerMatchday(sh, sa, trainingFeedback, extraPeGained, nextImmunityWeeks, injuryOccurredInSim);
   };
@@ -3866,7 +3899,7 @@ function DiceFootballApp() {
 
     // Si aún no entrenó voluntariamente en este partido, se simula el entrenamiento con 1D6
     if (career.trainedMatchKey !== currentMatchKey && career.trainedMatchday !== careerMd) {
-      const die = Math.floor(Math.random() * 6) + 1;
+      const die = roll1D6();
       if (die === 1) {
         extraPeGained = 2;
         trainingFeedback = {
@@ -3962,6 +3995,48 @@ function DiceFootballApp() {
     } else {
       syncLeaguesToGlobal(LEAGUE_IDS);
     }
+  };
+
+  // Simula hasta el final (100% de jornadas) todas las ligas europeas pendientes
+  // Permite cerrar todas las ligas restantes desde la interfaz de carrera directamente
+  const simulateAllRemainingLeagues = () => {
+    setComps(prev => {
+      const next = { ...prev };
+      let changed = false;
+      LEAGUE_IDS.forEach(compId => {
+        const comp = prev[compId];
+        if (!comp || comp.type !== 'league') return;
+        let upd = { ...comp };
+        let touched = false;
+        const runDivToFinish = (teamsKey: string, mdKey: string, histKey: string, winKey: string) => {
+          let guard = 0;
+          const total = divTotalRounds(upd[teamsKey]);
+          while ((upd[mdKey] || 0) < total && guard++ < 80) {
+            const res = simulateDivisionMatchday(upd[teamsKey], upd[mdKey] || 0, upd[histKey] || []);
+            if (!res) break;
+            touched = true;
+            upd = {
+              ...upd,
+              [teamsKey]: res.updatedTeams,
+              [mdKey]: res.nextMatchday,
+              [histKey]: res.newHistory,
+              [winKey]: res.isFinished ? true : upd[winKey]
+            };
+          }
+        };
+        runDivToFinish('teams', 'matchday', 'history', 'showWinner');
+        runDivToFinish('teams2', 'matchday2', 'history2', 'showWinner2');
+        if (touched) {
+          if (leagueSeasonOver(upd)) {
+            upd.previousStandings = buildStandingsSnapshot(upd.teams) || upd.previousStandings || null;
+            upd.previousStandings2 = buildStandingsSnapshot(upd.teams2) || upd.previousStandings2 || null;
+          }
+          next[compId] = upd;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
   };
 
   /* ===================== CHAMPIONS EN MODO CARRERA =====================
@@ -4176,6 +4251,7 @@ function DiceFootballApp() {
       const home = isHome ? myTeamResolved : rawHome;
       const away = isHome ? rawAway : myTeamResolved;
 
+      setMatchState(null);
       setMatchState({
         home,
         away,
@@ -4227,6 +4303,7 @@ function DiceFootballApp() {
         aggregate = { sh: match.sa, sa: match.sh };
       }
 
+      setMatchState(null);
       setMatchState({
         home,
         away,
@@ -4459,9 +4536,7 @@ function DiceFootballApp() {
 
     if (!home || !away) return;
 
-    let simH = 0, simA = 0;
-    for (let i = 0; i < (home.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (home.att || 0) && Math.floor(Math.random() * 6) + 1 > (away.def || 0)) simH++;
-    for (let i = 0; i < (away.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (away.att || 0) && Math.floor(Math.random() * 6) + 1 > (home.def || 0)) simA++;
+    const { sh: simH, sa: simA } = simMatchGoals(home.opp, home.att, away.def, away.opp, away.att, home.def);
 
     let penalties: any = null;
     if (phase !== 'groups') {
@@ -4475,19 +4550,7 @@ function DiceFootballApp() {
       const isDraw = phase === 'Final' ? (simH === simA) : isVuelta ? ((leg1H + simA) === (leg1A + simH)) : false;
 
       if (isDraw) {
-        let spH = 0, spA = 0, shH = 0, shA = 0;
-        const simPen = (att: number, def: number) => (Math.floor(Math.random() * 6) + 1 <= att && Math.floor(Math.random() * 6) + 1 > def);
-        for (let i = 0; i < 5; i++) {
-          if (simPen(home.att, away.def)) spH++; shH++;
-          if (spH > spA + (5 - shA) || spA > spH + (5 - shH)) break;
-          if (simPen(away.att, home.def)) spA++; shA++;
-          if (spH > spA + (5 - shA) || spA > spH + (5 - shH)) break;
-        }
-        while (spH === spA) {
-          if (simPen(home.att, away.def)) spH++;
-          if (simPen(away.att, home.def)) spA++;
-        }
-        penalties = { scoreH: spH, scoreA: spA };
+        penalties = simPenaltyShootout(home.att, away.def, away.att, home.def);
       }
     }
 
@@ -4512,7 +4575,7 @@ function DiceFootballApp() {
 
     // Si aún no entrenó voluntariamente en este partido de Champions, se simula con 1D6
     if (career.trainedMatchKey !== currentMatchKey) {
-      const die = Math.floor(Math.random() * 6) + 1;
+      const die = roll1D6();
       if (die === 1) {
         extraTrainingPe = 2;
         trainingFeedback = {
@@ -4611,9 +4674,7 @@ function DiceFootballApp() {
             currentRound.forEach((m: any) => {
               const h = (comp.teams || []).find((t: any) => t.id === m.homeId);
               const a = (comp.teams || []).find((t: any) => t.id === m.awayId);
-              let sh = 0, sa = 0;
-              for (let i = 0; i < (h?.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (h?.att || 0) && Math.floor(Math.random() * 6) + 1 > (a?.def || 0)) sh++;
-              for (let i = 0; i < (a?.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (a?.att || 0) && Math.floor(Math.random() * 6) + 1 > (h?.def || 0)) sa++;
+              const { sh, sa } = simMatchGoals(h?.opp, h?.att, a?.def, a?.opp, a?.att, h?.def);
               results.push({ hId: m.homeId, aId: m.awayId, sh, sa, penH: null, penA: null });
             });
           }
@@ -4669,9 +4730,7 @@ function DiceFootballApp() {
           const awayId = isVuelta ? m.hId : m.aId;
           const h = (comp.teams || []).find((t: any) => t.id === homeId);
           const a = (comp.teams || []).find((t: any) => t.id === awayId);
-          let simH = 0, simA = 0;
-          for (let i = 0; i < (h?.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (h?.att || 0) && Math.floor(Math.random() * 6) + 1 > (a?.def || 0)) simH++;
-          for (let i = 0; i < (a?.opp || 0); i++) if (Math.floor(Math.random() * 6) + 1 <= (a?.att || 0) && Math.floor(Math.random() * 6) + 1 > (h?.def || 0)) simA++;
+          const { sh: simH, sa: simA } = simMatchGoals(h?.opp, h?.att, a?.def, a?.opp, a?.att, h?.def);
 
           const matchSh = isVuelta ? simA : simH;
           const matchSa = isVuelta ? simH : simA;
@@ -4682,20 +4741,9 @@ function DiceFootballApp() {
             : (matchSh === matchSa);
 
           if (isDraw && (!isChampions || isVuelta || phase === 'Final')) {
-            let spH = 0, spA = 0, shH = 0, shA = 0;
-            const sim = (att: number, def: number) => (Math.floor(Math.random() * 6) + 1 <= att && Math.floor(Math.random() * 6) + 1 > def);
-            for (let i = 0; i < 5; i++) {
-              if (sim(h?.att || 1, a?.def || 1)) spH++; shH++;
-              if (spH > spA + (5 - shA) || spA > spH + (5 - shH)) break;
-              if (sim(a?.att || 1, h?.def || 1)) spA++; shA++;
-              if (spH > spA + (5 - shA) || spA > spH + (5 - shH)) break;
-            }
-            while (spH === spA) {
-              if (sim(h?.att || 1, a?.def || 1)) spH++;
-              if (sim(a?.att || 1, h?.def || 1)) spA++;
-            }
-            penH = isVuelta ? spA : spH;
-            penA = isVuelta ? spH : spA;
+            const penShootout = simPenaltyShootout(h?.att || 1, a?.def || 1, a?.att || 1, h?.def || 1);
+            penH = isVuelta ? penShootout.scoreA : penShootout.scoreH;
+            penA = isVuelta ? penShootout.scoreH : penShootout.scoreA;
           }
 
           if (isVuelta) {
@@ -5274,9 +5322,7 @@ function DiceFootballApp() {
                 const isUserMatch = ms && (m.homeId === currentComp.userTeamId || m.awayId === currentComp.userTeamId || m.homeId === ms.home?.id || m.awayId === ms.home?.id);
                 if (!isUserMatch) {
                    const h = currentComp.teams.find(t => t.id === m.homeId); const a = currentComp.teams.find(t => t.id === m.awayId);
-                   let sh = 0, sa = 0;
-                   for(let i=0; i<h.opp; i++) if(Math.floor(Math.random()*6)+1 <= h.att && Math.floor(Math.random()*6)+1 > a.def) sh++;
-                   for(let i=0; i<a.opp; i++) if(Math.floor(Math.random()*6)+1 <= a.att && Math.floor(Math.random()*6)+1 > h.def) sa++;
+                   const { sh, sa } = simMatchGoals(h?.opp, h?.att, a?.def, a?.opp, a?.att, h?.def);
                    results.push({ hId: m.homeId, aId: m.awayId, sh, sa, penH: null, penA: null });
                 }
              });
@@ -5330,27 +5376,20 @@ function DiceFootballApp() {
 
        matchesToProcess.forEach(m => {
           let sh, sa, penH, penA;
-          if (ms && m.hId === ms.home.id && m.aId === ms.away.id) { sh = ms.scoreH; sa = ms.scoreA; penH = ms.penalties?.scoreH; penA = ms.penalties?.scoreA; } 
-          else if (ms && isVuelta && m.hId === ms.away.id && m.aId === ms.home.id) { sh = ms.scoreA; sa = ms.scoreH; penH = ms.penalties?.scoreA; penA = ms.penalties?.scoreH; } 
-          else {
-             const h = currentComp.teams.find(t => t.id === (isVuelta ? m.aId : m.hId)); const a = currentComp.teams.find(t => t.id === (isVuelta ? m.hId : m.aId));
-             let simH = 0, simA = 0;
-             for(let i=0; i<h.opp; i++) if(Math.floor(Math.random()*6)+1 <= h.att && Math.floor(Math.random()*6)+1 > a.def) simH++;
-             for(let i=0; i<a.opp; i++) if(Math.floor(Math.random()*6)+1 <= a.att && Math.floor(Math.random()*6)+1 > h.def) simA++;
+          if (ms && m.hId === ms.home.id && m.aId === ms.away.id) {
+             sh = ms.scoreH; sa = ms.scoreA; penH = ms.penalties?.scoreH; penA = ms.penalties?.scoreA;
+          } else if (ms && isVuelta && m.hId === ms.away.id && m.aId === ms.home.id) {
+             sh = ms.scoreA; sa = ms.scoreH; penH = ms.penalties?.scoreA; penA = ms.penalties?.scoreH;
+          } else {
+             const h = currentComp.teams.find(t => t.id === (isVuelta ? m.aId : m.hId));
+             const a = currentComp.teams.find(t => t.id === (isVuelta ? m.hId : m.aId));
+             const { sh: simH, sa: simA } = simMatchGoals(h?.opp, h?.att, a?.def, a?.opp, a?.att, h?.def);
              if (isVuelta) { sh = simA; sa = simH; } else { sh = simH; sa = simA; }
              const isDraw = (isChampions && isVuelta && phase !== 'Final') ? (m.sh + sh === m.sa + sa) : (sh === sa);
              if (isDraw && (!isChampions || isVuelta || phase === 'Final')) {
-                let spH=0, spA=0, shH=0, shA=0;
-                const sim = (att, def) => (Math.floor(Math.random()*6)+1 <= att && Math.floor(Math.random()*6)+1 > def);
-                for(let i=0; i<5; i++){
-                   if(sim(h.att, a.def)) spH++; shH++;
-                   if(spH > spA + (5-shA) || spA > spH + (5-shH)) break;
-                   if(sim(a.att, h.def)) spA++; shA++;
-                   if(spH > spA + (5-shA) || spA > spH + (5-shH)) break;
-                }
-                while(spH===spA){ if(sim(h.att, a.def)) spH++; if(sim(a.att, h.def)) spA++; }
-                penH = isVuelta ? spA : spH;
-                penA = isVuelta ? spH : spA;
+                const penShootout = simPenaltyShootout(h?.att || 1, a?.def || 1, a?.att || 1, h?.def || 1);
+                penH = isVuelta ? penShootout.scoreA : penShootout.scoreH;
+                penA = isVuelta ? penShootout.scoreH : penShootout.scoreA;
              }
           }
           if (isVuelta) { m.sh2 = sh; m.sa2 = sa; } else { m.sh = sh; m.sa = sa; }
@@ -5364,10 +5403,34 @@ function DiceFootballApp() {
              const tH = isChampions && phase!=='Final' ? m.sh+m.sh2 : m.sh; const tA = isChampions && phase!=='Final' ? m.sa+m.sa2 : m.sa;
              if(tH>tA) return m.hId; if(tA>tH) return m.aId; return m.penH>m.penA ? m.hId : m.aId;
           });
-          if (phase === 'Octavos') { nextPhase = 'Cuartos'; newBracket.Cuartos = Array(4).fill(0).map((_, i) => ({ id: 'C'+(i+1), hId: winners[i*2], aId: winners[i*2+1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null })); } 
-          else if (phase === 'Cuartos') { nextPhase = 'Semis'; newBracket.Semis = Array(2).fill(0).map((_, i) => ({ id: 'S'+(i+1), hId: winners[i*2], aId: winners[i*2+1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null })); } 
-          else if (phase === 'Semis') { nextPhase = 'Final'; newBracket.Final = [{ id: 'F1', hId: winners[0], aId: winners[1], sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null }]; } 
-          else { nextPhase = 'Terminado'; showWinner = true; }
+          if (phase === 'Octavos') {
+            nextPhase = 'Cuartos';
+            newBracket.Cuartos = Array(4).fill(0).map((_, i) => ({
+              id: 'C' + (i + 1),
+              hId: winners[i * 2] ?? currentComp.teams?.[i * 2]?.id ?? 0,
+              aId: winners[i * 2 + 1] ?? currentComp.teams?.[i * 2 + 1]?.id ?? 1,
+              sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null
+            }));
+          } else if (phase === 'Cuartos') {
+            nextPhase = 'Semis';
+            newBracket.Semis = Array(2).fill(0).map((_, i) => ({
+              id: 'S' + (i + 1),
+              hId: winners[i * 2] ?? currentComp.teams?.[i * 2]?.id ?? 0,
+              aId: winners[i * 2 + 1] ?? currentComp.teams?.[i * 2 + 1]?.id ?? 1,
+              sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null
+            }));
+          } else if (phase === 'Semis') {
+            nextPhase = 'Final';
+            newBracket.Final = [{
+              id: 'F1',
+              hId: winners[0] ?? currentComp.teams?.[0]?.id ?? 0,
+              aId: winners[1] ?? currentComp.teams?.[1]?.id ?? 1,
+              sh: null, sa: null, penH: null, penA: null, sh2: null, sa2: null
+            }];
+          } else {
+            nextPhase = 'Terminado';
+            showWinner = true;
+          }
        }
         const dayLabel = phase === 'Final'
           ? 'Gran Final'
@@ -5421,9 +5484,7 @@ function DiceFootballApp() {
           if(m.homeId === matchState.away.id) return { hId: m.homeId, aId: m.awayId, sh: matchState.scoreA, sa: matchState.scoreH };
         }
         const h = tArray.find((t: any) => t.id === m.homeId); const a = tArray.find((t: any) => t.id === m.awayId);
-        let sh = 0, sa = 0;
-        for(let i=0; i<(h?.opp||0); i++) if(Math.floor(Math.random()*6)+1 <= (h?.att||0) && Math.floor(Math.random()*6)+1 > (a?.def||0)) sh++;
-        for(let i=0; i<(a?.opp||0); i++) if(Math.floor(Math.random()*6)+1 <= (a?.att||0) && Math.floor(Math.random()*6)+1 > (h?.def||0)) sa++;
+        const { sh, sa } = simMatchGoals(h?.opp, h?.att, a?.def, a?.opp, a?.att, h?.def);
         return { hId: m.homeId, aId: m.awayId, sh, sa };
       });
 
@@ -6370,6 +6431,7 @@ function DiceFootballApp() {
                       <button onClick={() => {
                         setChampionModalTab('stats');
                         setChampionModalDiv(1);
+                        setMatchState(null);
                         updateActiveComp({ showWinner: false, showWinner2: false });
                         setActiveCompId('C1');
                         setCompView('main');
@@ -7191,7 +7253,9 @@ function DiceFootballApp() {
                 onBack={() => setView('hub')}
                 onPlayMatch={startCareerMatch}
                 onSimulateMatch={simulateCareerMatchday}
-                onSimulateWorld={() => syncLeaguesToGlobal(LEAGUE_IDS.filter(id => id !== career.compId))}
+                onSimulateWorld={simulateAllPendingLeagues}
+                onSimulateGlobalMatchday={simulateAllPendingLeagues}
+                onSimulateAllRemainingLeagues={simulateAllRemainingLeagues}
                 onSetTactic={setCareerTactic}
                 onSpendPE={spendCareerPE}
                 onApplyTrainingStats={applyTrainingStats}
