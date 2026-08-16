@@ -160,28 +160,30 @@ export const repForMatch = (result, ownStrength, rivalStrength, coachRep = 10) =
   return -(0.5 + Math.max(0, Math.min(0.5, -gap * 0.15)) + 0.25);
 };
 
-// Objetivos por Tier (GDD §12) — evaluados sobre 20 equipos
+// Objetivos por Tier (GDD §12) — evaluados sobre 20 equipos (3 ascensos / 3 descensos)
 const OBJECTIVES = {
   1: [
-    { from: 1, to: 6, rep: 20, pe: 50, note: 'Ascenso a Tier 2', promote: true },
-    { from: 7, to: 11, rep: 10, pe: 30, note: 'Temporada notable' },
-    { from: 12, to: 15, rep: 5, pe: 15, note: 'Objetivo cumplido' },
+    { from: 1, to: 3, rep: 25, pe: 60, note: 'Ascenso directo a Tier 2 / 1ª División', promote: true },
+    { from: 4, to: 10, rep: 10, pe: 30, note: 'Temporada notable' },
+    { from: 11, to: 15, rep: 5, pe: 15, note: 'Objetivo cumplido' },
     { from: 16, to: 17, rep: -8, pe: 5, note: 'Temporada preocupante' },
-    { from: 18, to: 20, rep: -20, pe: 0, note: 'Descenso; despido seguro', fire: true }
+    { from: 18, to: 20, rep: -20, pe: 0, note: 'Zona de descenso; despido seguro', fire: true }
   ],
   2: [
-    { from: 1, to: 2, rep: 25, pe: 60, note: 'Ascenso a Tier 3', promote: true },
-    { from: 3, to: 10, rep: 5, pe: 20, note: 'Objetivo cumplido' },
-    { from: 11, to: 20, rep: -15, pe: 0, note: 'Posible despido', riskFire: true }
+    { from: 1, to: 3, rep: 25, pe: 60, note: 'Ascenso directo a 1ª División (Top 3)', promote: true },
+    { from: 4, to: 10, rep: 5, pe: 20, note: 'Objetivo cumplido' },
+    { from: 11, to: 17, rep: -10, pe: 5, note: 'Temporada decepcionante' },
+    { from: 18, to: 20, rep: -20, pe: 0, note: 'Zona de descenso; despido inminente', riskFire: true }
   ],
   3: [
-    { from: 1, to: 4, rep: 20, pe: 50, note: 'Gran temporada', promote: true },
+    { from: 1, to: 4, rep: 20, pe: 50, note: 'Gran temporada (Puestos Champions)', promote: true },
     { from: 5, to: 12, rep: 5, pe: 20, note: 'Objetivo cumplido' },
-    { from: 13, to: 20, rep: -25, pe: 0, note: 'Despido inminente', fire: true }
+    { from: 13, to: 17, rep: -15, pe: 0, note: 'Temporada preocupante' },
+    { from: 18, to: 20, rep: -25, pe: 0, note: 'Descenso a 2ª División; despido seguro', fire: true }
   ],
   4: [
     { from: 1, to: 1, rep: 25, pe: 0, note: 'Campeón: exigencia cumplida' },
-    { from: 2, to: 4, rep: 5, pe: 0, note: 'Aceptable' },
+    { from: 2, to: 4, rep: 5, pe: 0, note: 'Aceptable (Zona Champions)' },
     { from: 5, to: 20, rep: -25, pe: 0, note: 'Crisis; despido probable', riskFire: true }
   ]
 };
