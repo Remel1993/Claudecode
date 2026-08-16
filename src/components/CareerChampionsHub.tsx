@@ -91,21 +91,33 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
     return idx >= 0 ? idx : 0;
   }, [selectedGroupIdx, userGroup, clComp]);
 
+  // Determinar si el club no clasificó a Champions esta temporada
+  const isNotQualified = useMemo(() => {
+    if (careerClTeam) return false;
+    if (career.clQualified) return false;
+    if (clInfo && !clInfo.notQualified) return false;
+    return true;
+  }, [careerClTeam, career.clQualified, clInfo]);
+
   // Encontrar el último partido jugado por el usuario en Champions League (cronológicamente el más reciente)
   const lastPlayedChampionsMatch = useMemo(() => {
+    // Si el club no clasificó o no tiene equipo asignado en Champions, no renderizar tarjeta de partido previo
+    if (isNotQualified || !careerClTeam || careerClTeam.id === undefined || careerClTeam.id === null) return null;
+    const userClId = careerClTeam.id;
+
     // 1. Buscar en el historial general de Champions (C1) - index 0 es la jornada más reciente
     let historyMatch: any = null;
     if (Array.isArray(clComp?.history) && clComp.history.length > 0) {
       for (let i = 0; i < clComp.history.length; i++) {
         const h = clComp.history[i];
-        const m = (h.results || []).find((r: any) => r.hId === careerClTeam?.id || r.aId === careerClTeam?.id);
+        const m = (h.results || []).find((r: any) => r && (r.hId === userClId || r.aId === userClId));
         if (m) {
-          const ht = clComp.teams.find((t: any) => t.id === m.hId);
-          const at = clComp.teams.find((t: any) => t.id === m.aId);
-          const isHome = m.hId === careerClTeam?.id;
+          const ht = clComp.teams.find((t: any) => t.id === m.hId) || { name: 'Local' };
+          const at = clComp.teams.find((t: any) => t.id === m.aId) || { name: 'Visitante' };
+          const isHome = m.hId === userClId;
           const myScore = isHome ? m.sh : m.sa;
           const rivalScore = isHome ? m.sa : m.sh;
-          const rivalTeam = isHome ? at : ht;
+          const rivalTeam = (isHome ? at : ht) || { name: 'Rival Europeo' };
           const res = myScore > rivalScore ? 'W' : myScore === rivalScore ? 'D' : 'L';
 
           // Detectar si fue partido de eliminatoria de ida y vuelta
@@ -115,36 +127,47 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
           
           if (isKnockout && phaseKey && safeBracket?.[phaseKey]) {
             const bMatches = Array.isArray(safeBracket[phaseKey]) ? safeBracket[phaseKey] : [safeBracket[phaseKey]];
-            const bMatch = bMatches.find((bm: any) => bm && (bm.hId === careerClTeam?.id || bm.aId === careerClTeam?.id));
+            const bMatch = bMatches.find((bm: any) => bm && (bm.hId === userClId || bm.aId === userClId));
             if (bMatch && bMatch.sh !== null) {
-              const teamIsHId = bMatch.hId === careerClTeam?.id;
               const hasVuelta = bMatch.sh2 !== null && bMatch.sh2 !== undefined;
-              const totH = (bMatch.sh || 0) + (bMatch.sh2 || 0);
-              const totA = (bMatch.sa || 0) + (bMatch.sa2 || 0);
-              const myTot = teamIsHId ? totH : totA;
-              const rivalTot = teamIsHId ? totA : totH;
-              
+              const isVuelta = (h.day || '').includes('Vuelta') || hasVuelta;
+
+              // En la ida: hId es Local, aId es Visitante
+              // En la vuelta: aId es Local (recibe la vuelta), hId es Visitante
+              // Totales globales:
+              // hId: goles en ida (sh) + goles en vuelta (sa2)
+              // aId: goles en ida (sa) + goles en vuelta (sh2)
+              const totHId = (bMatch.sh || 0) + (bMatch.sa2 || 0);
+              const totAId = (bMatch.sa || 0) + (bMatch.sh2 || 0);
+
+              // Alinear el resultado global de cara al escudo mostrado a la izquierda y derecha en este partido
+              const leftTotal = isVuelta ? totAId : (bMatch.sh || 0);
+              const rightTotal = isVuelta ? totHId : (bMatch.sa || 0);
+              const globalLeft = isVuelta ? totAId : totHId;
+              const globalRight = isVuelta ? totHId : totAId;
+
               let qualified = null;
               if (hasVuelta) {
-                if (totH > totA) qualified = teamIsHId;
-                else if (totA > totH) qualified = !teamIsHId;
+                let winnerId = null;
+                if (totHId > totAId) winnerId = bMatch.hId;
+                else if (totAId > totHId) winnerId = bMatch.aId;
                 else if (bMatch.penH !== null && bMatch.penH !== undefined) {
-                  qualified = bMatch.penH > bMatch.penA ? teamIsHId : !teamIsHId;
+                  // penH es del local de vuelta (aId), penA es del visitante de vuelta (hId)
+                  winnerId = bMatch.penH > bMatch.penA ? bMatch.aId : bMatch.hId;
+                }
+                if (winnerId !== null) {
+                  qualified = winnerId === userClId;
                 }
               }
 
               aggregateInfo = {
                 phaseName: phaseKey,
-                isVuelta: (h.day || '').includes('Vuelta') || hasVuelta,
+                isVuelta,
                 leg1Score: `${bMatch.sh} - ${bMatch.sa}`,
                 leg2Score: hasVuelta ? `${bMatch.sh2} - ${bMatch.sa2}` : null,
-                myLeg1: teamIsHId ? bMatch.sh : bMatch.sa,
-                rivalLeg1: teamIsHId ? bMatch.sa : bMatch.sh,
-                myLeg2: hasVuelta ? (teamIsHId ? bMatch.sh2 : bMatch.sa2) : null,
-                rivalLeg2: hasVuelta ? (teamIsHId ? bMatch.sa2 : bMatch.sh2) : null,
-                myTotal: myTot,
-                rivalTotal: rivalTot,
-                globalScoreText: hasVuelta ? `${myTot} - ${rivalTot}` : null,
+                leftTotal,
+                rightTotal,
+                globalScoreText: hasVuelta ? `${globalLeft} - ${globalRight}` : `${bMatch.sh} - ${bMatch.sa}`,
                 penaltiesText: (bMatch.penH !== null && bMatch.penH !== undefined) ? `(${bMatch.penH}-${bMatch.penA} pen.)` : null,
                 qualified
               };
@@ -178,7 +201,7 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
     if (historyMatch) return historyMatch;
 
     const clLogEntry = (career.seasonLog || []).find((l: any) => l.isChampions);
-    if (clLogEntry) {
+    if (clLogEntry && !isNotQualified) {
       return {
         dayLabel: `Champions · ${clPhaseLabel(clLogEntry.phase || 'groups')}`,
         home: null,
@@ -197,7 +220,7 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
     }
 
     return null;
-  }, [career.seasonLog, clComp, careerClTeam]);
+  }, [career.seasonLog, clComp, careerClTeam, isNotQualified, safeBracket]);
 
   // Calcular el partido actual del usuario en Champions
   const currentMatchData = useMemo(() => {
@@ -244,8 +267,8 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
 
         let aggregate = null;
         if (isVuelta && match.sh !== null && match.sa !== null) {
-          // Ida: sh (hId), sa (aId)
-          // En la vuelta, el equipo hId juega de visitante
+          // Ida: match.sh (goles anotados por match.hId), match.sa (goles anotados por match.aId)
+          // En la vuelta: rawHome es match.aId (Local a la izquierda) y rawAway es match.hId (Visitante a la derecha)
           aggregate = {
             homeLeg1: match.sa, // goles que metió el que ahora es local en la ida
             awayLeg1: match.sh  // goles que metió el que ahora es visitante en la ida
@@ -262,20 +285,14 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
           phaseLabel: `${clPhaseLabel(phase)} · ${legText}`,
           isVuelta,
           aggregate,
-          leg1Score: match.sh !== null && match.sa !== null ? `${match.sh} - ${match.sa}` : null
+          leg1Score: (aggregate && aggregate.homeLeg1 !== null && aggregate.awayLeg1 !== null)
+            ? `${aggregate.homeLeg1} - ${aggregate.awayLeg1}`
+            : (match.sh !== null && match.sa !== null ? `${match.sh} - ${match.sa}` : null)
         };
       }
     }
     return null;
   }, [clComp, safeBracket, careerClTeam, phase, matchday, userGroup]);
-
-  // Determinar si el club no clasificó a Champions esta temporada
-  const isNotQualified = useMemo(() => {
-    if (careerClTeam) return false;
-    if (career.clQualified) return false;
-    if (clInfo && !clInfo.notQualified) return false;
-    return true;
-  }, [careerClTeam, career.clQualified, clInfo]);
 
   // Clave de partido de Champions League para independizar entrenamiento
   const clMatchKey = useMemo(() => {
@@ -302,6 +319,14 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
     else if (penH !== null && penA !== null) winnerId = penH > penA ? hId : aId;
     return winnerId === careerClTeam.id;
   }, [isNotQualified, isFinished, safeBracket, careerClTeam]);
+
+  // Determinar si el club fue finalista (subcampeón) de Champions
+  const isFinalist = useMemo(() => {
+    if (isNotQualified || !careerClTeam) return false;
+    const finalMatch = safeBracket?.Final?.[0] || safeBracket?.Final;
+    if (!finalMatch) return false;
+    return finalMatch.hId === careerClTeam.id || finalMatch.aId === careerClTeam.id;
+  }, [isNotQualified, careerClTeam, safeBracket]);
 
   // Determinar si sigue vivo en Champions
   const isAlive = useMemo(() => {
@@ -609,23 +634,18 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                 {lastPlayedChampionsMatch.aggregateInfo && (
                   <div className='bg-blue-950/60 rounded-2xl p-2.5 border border-blue-400/30 flex flex-wrap items-center justify-between gap-2 text-[8px] font-bold text-slate-200'>
                     <div className='flex items-center gap-2'>
-                      <span className='text-amber-400 font-black uppercase tracking-wider'>Marcador Global:</span>
-                      <span className='bg-black/60 px-2 py-0.5 rounded-lg font-black text-white text-[9px] border border-white/10'>
-                        Ida: {lastPlayedChampionsMatch.aggregateInfo.leg1Score}
-                      </span>
-                      {lastPlayedChampionsMatch.aggregateInfo.leg2Score && (
-                        <span className='bg-black/60 px-2 py-0.5 rounded-lg font-black text-white text-[9px] border border-white/10'>
-                          Vuelta: {lastPlayedChampionsMatch.aggregateInfo.leg2Score}
+                      {lastPlayedChampionsMatch.aggregateInfo.globalScoreText ? (
+                        <span className='bg-blue-600 px-3 py-1 rounded-xl font-black text-white text-[9.5px] shadow-sm tracking-wide'>
+                          RESULTADO GLOBAL: {lastPlayedChampionsMatch.aggregateInfo.globalScoreText} {lastPlayedChampionsMatch.aggregateInfo.penaltiesText || ''}
                         </span>
-                      )}
-                      {lastPlayedChampionsMatch.aggregateInfo.globalScoreText && (
-                        <span className='bg-blue-600 px-2.5 py-0.5 rounded-lg font-black text-white text-[9px] shadow-sm'>
-                          GLOBAL: {lastPlayedChampionsMatch.aggregateInfo.globalScoreText} {lastPlayedChampionsMatch.aggregateInfo.penaltiesText || ''}
+                      ) : (
+                        <span className='bg-blue-600/80 px-2.5 py-1 rounded-xl font-black text-white text-[9px]'>
+                          GLOBAL: {lastPlayedChampionsMatch.aggregateInfo.myTotal} - {lastPlayedChampionsMatch.aggregateInfo.rivalTotal}
                         </span>
                       )}
                     </div>
                     {lastPlayedChampionsMatch.aggregateInfo.qualified !== null && (
-                      <span className={`px-2 py-0.5 rounded-full font-black uppercase tracking-wider ${
+                      <span className={`px-2.5 py-1 rounded-full font-black uppercase tracking-wider text-[8px] ${
                         lastPlayedChampionsMatch.aggregateInfo.qualified
                           ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                           : 'bg-red-500/20 text-red-300 border border-red-500/30'
@@ -676,7 +696,7 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                   </div>
                   {currentMatchData.aggregate && (
                     <span className='text-[9px] font-black bg-blue-500/20 text-blue-200 px-2.5 py-1 rounded-full border border-blue-500/30'>
-                      Global Ida: {currentMatchData.leg1Score}
+                      Resultado Ida: {currentMatchData.leg1Score}
                     </span>
                   )}
                 </div>
@@ -839,6 +859,57 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                       <Zap size={14} className='text-yellow-300' /> Simular Torneo Completo
                     </button>
                   )}
+                  {onOpenNewSeason && isFinished && (
+                    <button
+                      onClick={onOpenNewSeason}
+                      className='bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 px-5 py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2'
+                    >
+                      <RotateCcw size={15} /> Iniciar Nueva Temporada Global
+                    </button>
+                  )}
+                  {onBackToCareer && (
+                    <button
+                      onClick={onBackToCareer}
+                      className='bg-slate-800 hover:bg-slate-700 text-slate-200 px-5 py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest border border-white/10 active:scale-95 transition-all'
+                    >
+                      Volver a la Liga Nacional
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : isFinalist && isFinished ? (
+              <div className='bg-gradient-to-br from-slate-800 via-indigo-950 to-slate-900 border border-slate-400/40 rounded-3xl p-6 text-center space-y-4 shadow-xl'>
+                <div className='w-14 h-14 rounded-2xl bg-slate-700/60 border border-slate-400/30 flex items-center justify-center mx-auto shadow-inner'>
+                  <Trophy size={32} className='text-slate-300' />
+                </div>
+                <div>
+                  <span className='text-[8px] font-black uppercase tracking-widest text-slate-300 bg-slate-700/60 px-3 py-1 rounded-full border border-slate-400/30'>
+                    Subcampeón de la UEFA Champions League
+                  </span>
+                  <h3 className='text-base font-black uppercase italic text-white mt-2'>
+                    Gran Finalista de Europa
+                  </h3>
+                  <p className='text-xs font-bold text-slate-300 max-w-sm mx-auto mt-1 leading-relaxed'>
+                    Tu club llegó hasta la Gran Final de la Champions League completando una temporada continental histórica como subcampeón de Europa.
+                  </p>
+                </div>
+
+                <div className='flex justify-center gap-3 pt-1'>
+                  <div className='bg-black/40 px-4 py-2 rounded-2xl border border-slate-500/30 text-center'>
+                    <p className='text-[8px] font-black uppercase text-slate-400'>Recompensa Mánager</p>
+                    <p className='text-xs font-black text-white'>+6 PE · +4.5 Reputación</p>
+                  </div>
+                </div>
+
+                <div className='flex flex-col sm:flex-row gap-2 justify-center pt-2'>
+                  {onOpenNewSeason && (
+                    <button
+                      onClick={onOpenNewSeason}
+                      className='bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 px-5 py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2'
+                    >
+                      <RotateCcw size={15} /> Iniciar Nueva Temporada Global
+                    </button>
+                  )}
                   {onBackToCareer && (
                     <button
                       onClick={onBackToCareer}
@@ -854,13 +925,15 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                 <XCircle size={40} className='text-red-400 mx-auto' />
                 <div>
                   <span className='text-[8px] font-black uppercase tracking-widest text-red-400 bg-red-500/10 px-3 py-1 rounded-full border border-red-500/30'>
-                    Eliminado de la Competición
+                    {isFinished ? 'Temporada Continental Finalizada' : 'Eliminado de la Competición'}
                   </span>
                   <h3 className='text-sm font-black uppercase italic text-white mt-2'>
-                    Tu Club Ha Sido Eliminado
+                    {isFinished ? 'Torneo Continental Concluido' : 'Tu Club Ha Sido Eliminado'}
                   </h3>
-                  <p className='text-xs font-bold text-slate-300 max-w-sm mx-auto mt-1'>
-                    Tu equipo ha quedado fuera de la Champions League esta temporada. Puedes simular el resto del torneo para ver al campeón o regresar a competir en tu Liga Nacional.
+                  <p className='text-xs font-bold text-slate-300 max-w-sm mx-auto mt-1 leading-relaxed'>
+                    {isFinished
+                      ? 'La UEFA Champions League ha llegado a su fin. Puedes revisar el cuadro de honor y la tabla final o iniciar la nueva temporada global.'
+                      : 'Tu equipo ha quedado fuera de la Champions League esta temporada. Puedes simular el resto del torneo para ver al campeón o regresar a competir en tu Liga Nacional.'}
                   </p>
                 </div>
 
@@ -871,6 +944,14 @@ export const CareerChampionsHub: React.FC<CareerChampionsHubProps> = ({
                       className='bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-5 py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest active:scale-95 transition-all shadow flex items-center justify-center gap-2'
                     >
                       <Zap size={14} className='text-yellow-300' /> Simular Resto de la Champions League
+                    </button>
+                  )}
+                  {onOpenNewSeason && isFinished && (
+                    <button
+                      onClick={onOpenNewSeason}
+                      className='bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 px-5 py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2'
+                    >
+                      <RotateCcw size={15} /> Iniciar Nueva Temporada Global
                     </button>
                   )}
                   {onBackToCareer && (

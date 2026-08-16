@@ -9,6 +9,7 @@ interface EndSeasonModalProps {
   onOpenReview: () => void;
   onOpenChampions?: () => void;
   onNewSeason?: () => void;
+  isClQualified?: boolean;
   championsFinished?: boolean;
   allLeaguesFinished?: boolean;
   team: any;
@@ -30,6 +31,7 @@ export const EndSeasonModal: React.FC<EndSeasonModalProps> = ({
   onOpenReview,
   onOpenChampions,
   onNewSeason,
+  isClQualified = false,
   championsFinished,
   allLeaguesFinished,
   team,
@@ -143,14 +145,16 @@ export const EndSeasonModal: React.FC<EndSeasonModalProps> = ({
             <Inbox size={14} className="animate-pulse" /> Aviso de Contrataciones
           </p>
           <p className="text-[11px] font-bold text-slate-100 leading-snug">
-            Revisa tus opciones de Champions League, tu <span className="text-amber-300 underline font-black">Buzón</span> de ofertas o inicia la siguiente temporada.
+            {isClQualified && !championsFinished
+              ? 'Disputa tus eliminatorias de Champions League, revisa tu Buzón de ofertas o inicia la siguiente temporada.'
+              : 'Revisa tu Buzón de ofertas y firma tu nuevo contrato, revisa tu balance o inicia la siguiente temporada.'}
           </p>
         </div>
 
         {/* Acciones */}
         <div className="mt-5 space-y-2">
-          {/* Botón directo para ir y jugar la Champions League */}
-          {onOpenChampions && (
+          {/* Botón directo para ir y jugar la Champions League (solo si el club clasificó y aún está en juego) */}
+          {onOpenChampions && isClQualified && !championsFinished && (
             <button
               onClick={() => {
                 onClose();
@@ -159,7 +163,7 @@ export const EndSeasonModal: React.FC<EndSeasonModalProps> = ({
               className="w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:to-indigo-500 text-white py-3.5 rounded-2xl text-[10px] font-black uppercase italic tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 border border-blue-400/40"
             >
               <Trophy size={16} className="text-yellow-300 animate-pulse" />
-              {championsFinished ? 'Ver Champions League' : 'Jugar Champions League'} <ArrowRight size={14} />
+              Jugar Champions League <ArrowRight size={14} />
             </button>
           )}
 
